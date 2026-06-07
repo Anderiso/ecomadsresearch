@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AdRemix</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        surface: { 1: '#0a0a0f', 2: '#12121a', 3: '#1a1a26', 4: '#24243a' },
+        accent: { DEFAULT: '#6d5cff', light: '#8b7fff', dim: '#4a3db8' },
+      }
+    }
+  }
+}
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  .drop-zone.dragover { border-color: #6d5cff; background: rgba(109,92,255,.08); }
+  textarea, input { outline: none; }
+  textarea:focus, input:focus { border-color: #6d5cff; }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .step-card { transition: opacity .2s, max-height .3s; }
+  .segment-card:hover { border-color: #6d5cff; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+  .copy-btn::after { content: 'Copied!'; position: absolute; right: 0; top: -24px;
+    font-size: 11px; color: #6d5cff; opacity: 0; transition: opacity .2s; }
+  .copy-btn.copied::after { opacity: 1; }
+</style>
+</head>
+
+<body class="dark bg-surface-1 text-gray-200 min-h-screen flex">
+
+<!-- ===== SIDEBAR ===== -->
+<aside id="sidebar" class="w-80 flex-shrink-0 bg-surface-2 border-r border-white/5 flex flex-col h-screen sticky top-0">
+  <div class="p-5 border-b border-white/5 flex items-center gap-2">
+    <svg class="w-7 h-7 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+    <span class="text-lg font-bold tracking-tight">AdRemix</span>
+  </div>
+
+  <div class="flex-1 overflow-y-auto p-5 space-y-4">
+    <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-500">Brand Profile</h3>
+
+    <label class="block">
+      <span class="text-xs text-gray-400 mb-1 block">Brand Name</span>
+      <input id="brand_name" class="w-full bg-surface-3 border border-white/10 rounded-lg px-3 py-2 text-sm" placeholder="e.g. Dating Halo" />
+    </label>
+
+    <label class="block">
+      <span class="text-xs text-gray-400 mb-1 block">Product Description</span>
+      <textarea id="product_description" rows="3" class="w-full bg-surface-3 border border-white/10 rounded-lg px-3 py-2 text-sm" placeholder="What does your product do? Who is it for?"></textarea>
+    </label>
+
+    <label class="block">
+      <span class="text-xs text-gray-400 mb-1 block">Target Audience</span>
+      <input id="target_audience" class="w-full bg-surface-3 border border-white/10 rounded-lg px-3 py-2 text-sm" placeholder="e.g. single men 25-35" />
+    </label>
+
+    <label class="block">
+      <span class="text-xs text-gray-400 mb-1 block">Segment Length (seconds)</span>
+      <input id="segment_length" type="number" value="15" min="5" max="30" class="w-full bg-surface-3 border border-white/10 rounded-lg px-3 py-2 text-sm" />
+    </label>
+
+    <button onclick="saveBrand()" class="w-full bg-accent hover:bg-accent-light text-white text-sm font-medium py-2 rounded-lg transition">
+      Save Profile
+    </button>
+    <p id="brand-saved" class="text-xs text-green-400 text-center hidden">Saved ✓</p>
+
+    <div id="speech-pace-section" class="hidden pt-4 mt-2 border-t border-white/5 space-y-3">
+      <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-500">This Ad</h3>
+      <label class="block">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs text-gray-400">Speech pace</span>
+          <span id="speech-wpm-value" class="text-xs text-accent font-semibold tabular-nums">— WPM</span>
+        </div>
+        <p id="speech-wpm-baseline" class="text-[11px] text-gray-600 mb-2 leading-relaxed"></p>
+        <input id="speech_wpm" type="range" min="100" max="200" value="150" step="1"
+          class="w-full accent-accent cursor-pointer" oninput="updateSpeechPaceUI()" />
+        <div class="flex justify-between text-[10px] text-gray-600 mt-1">
+          <span>Slower</span>
+          <span>Faster</span>
+        </div>
+        <p id="speech-wpm-hint" class="text-[11px] text-gray-600 mt-2 leading-relaxed"></p>
+      </label>
+    </div>
+  </div>
+
+  <div class="p-4 border-t border-white/5 text-[11px] text-gray-600 text-center">
+    Whisper API + Claude API &middot; costs ~$0.03/ad
+  </div>
+</aside>
+
+<!-- ===== MAIN PIPELINE ===== -->
+<main class="flex-1 overflow-y-auto">
+  <div class="max-w-3xl mx-auto px-6 py-8 space-y-6">
+
+    <h1 class="text-2xl font-bold tracking-tight">Ad Remix Pipeline</h1>
+    <p class="text-sm text-gray-500 -mt-3">Upload an ad → transcribe → rewrite → generate segment prompts → export</p>
+
+    <!-- ── STEP 1: UPLOAD ── -->
+    <section class="step-card bg-surface-2 rounded-xl border border-white/5 p-5">
+      <h2 class="font-semibold flex items-center gap-2 mb-4">
+        <span class="bg-accent/20 text-accent text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">1</span>
+        Upload Ad Video
+      </h2>
+
+      <div id="drop-zone" class="drop-zone border-2 border-dashed border-white/10 rounded-xl p-10 text-center cursor-pointer hover:border-accent/50 transition">
+        <svg class="mx-auto w-10 h-10 text-gray-600 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16"/></svg>
+        <p class="text-sm text-gray-400">Drag &amp; drop a video/audio file here, or <span class="text-accent underline">click to browse</span></p>
+        <p class="text-xs text-gray-600 mt-1">mp4 · mov · webm · mp3 · m4a · wav &middot; up to 500 MB</p>
+        <p class="text-xs text-gray-600">Files over 25 MB are auto-compressed (full audio kept) before Whisper</p>
+        <input id="file-input" type="file" accept="video/*,audio/*,.mp4,.mov,.webm,.mp3,.m4a,.wav,.ogg,.flac" class="hidden" />
+      </div>
+      <p id="file-name" class="text-xs text-gray-500 mt-2 hidden"></p>
+      <p id="file-large-hint" class="text-xs text-amber-500/90 mt-1 hidden">Will extract &amp; compress audio before transcribing (nothing trimmed).</p>
+      <p id="transcribe-status" class="text-xs text-gray-500 mt-2 hidden"></p>
+
+      <button id="btn-transcribe" onclick="runTranscribe()" disabled
+        class="mt-4 w-full bg-accent hover:bg-accent-light disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-2">
+        <span id="transcribe-spinner" class="hidden"><svg class="w-4 h-4 spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83"/></svg></span>
+        <span id="transcribe-label">Transcribe</span>
+      </button>
+    </section>
+
+    <!-- ── STEP 2: TRANSCRIPT ── -->
+    <section id="step-transcript" class="step-card bg-surface-2 rounded-xl border border-white/5 p-5 hidden">
+      <h2 class="font-semibold flex items-center gap-2 mb-1">
+        <span class="bg-accent/20 text-accent text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">2</span>
+        Original Transcript
+      </h2>
+      <p class="text-xs text-gray-500 mb-3">Edit if Whisper got anything wrong, set the tone for this ad, then rewrite for your brand.</p>
+
+      <div class="flex items-center gap-2 mb-2 text-xs text-gray-500">
+        <span id="duration-badge" class="bg-surface-3 px-2 py-0.5 rounded"></span>
+        <span id="word-count-badge" class="bg-surface-3 px-2 py-0.5 rounded"></span>
+      </div>
+
+      <textarea id="transcript-text" rows="6" class="w-full bg-surface-3 border border-white/10 rounded-lg px-4 py-3 text-sm leading-relaxed"></textarea>
+
+      <label class="block mt-4">
+        <span class="text-xs text-gray-400 mb-1 block">Tone / Voice <span class="text-gray-600">(for this ad)</span></span>
+        <input id="ad_tone" class="w-full bg-surface-3 border border-white/10 rounded-lg px-3 py-2 text-sm" placeholder="e.g. casual, confident, relatable — not saved to brand profile" />
+      </label>
+
+      <button id="btn-rewrite" onclick="runRewrite()"
+        class="mt-3 w-full bg-accent hover:bg-accent-light text-white text-sm font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-2">
+        <span id="rewrite-spinner" class="hidden"><svg class="w-4 h-4 spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83"/></svg></span>
+        Rewrite for My Brand
+      </button>
+    </section>
+
+    <!-- ── STEP 3: REWRITE ── -->
+    <section id="step-rewrite" class="step-card bg-surface-2 rounded-xl border border-white/5 p-5 hidden">
+      <h2 class="font-semibold flex items-center gap-2 mb-1">
+        <span class="bg-accent/20 text-accent text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">3</span>
+        Rewritten Script
+      </h2>
+      <p class="text-xs text-gray-500 mb-3">Edit each timed chunk, optionally add visual reference, then generate Seeddance prompts.</p>
+
+      <p id="rewrite-plan-summary" class="text-xs text-gray-500 mb-3 hidden"></p>
+      <div id="rewrite-chunks-container" class="space-y-4"></div>
+
+      <div class="mt-5 pt-5 border-t border-white/5">
+        <h3 class="text-sm font-medium mb-1">Visual Reference <span class="text-gray-600 font-normal">(optional)</span></h3>
+        <p class="text-xs text-gray-500 mb-3">Describe how the original ad looked and/or add screenshots (upload, drag-drop, or paste into the box below).</p>
+
+        <label class="block">
+          <span class="text-xs text-gray-400 mb-1 block">What does the original ad look like?</span>
+          <textarea id="visual-description" rows="3" class="w-full bg-surface-3 border border-white/10 rounded-lg px-4 py-3 text-sm leading-relaxed" placeholder="Describe the look… or paste a screenshot here (Ctrl+V) and it’ll attach as a reference image"></textarea>
+        </label>
+
+        <div id="ref-images-drop" class="drop-zone mt-3 border-2 border-dashed border-white/10 rounded-xl p-6 text-center cursor-pointer hover:border-accent/50 transition">
+          <svg class="mx-auto w-8 h-8 text-gray-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          <p class="text-sm text-gray-400">Drop screenshots here or <span class="text-accent underline">browse</span></p>
+          <p class="text-xs text-gray-600 mt-1">Up to 5 images · jpg · png · webp · max 5 MB each</p>
+          <input id="ref-images-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple class="hidden" />
+        </div>
+        <div id="ref-images-preview" class="flex flex-wrap gap-3 mt-3"></div>
+      </div>
+
+      <button id="btn-segment" onclick="runSegment()"
+        class="mt-3 w-full bg-accent hover:bg-accent-light text-white text-sm font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-2">
+        <span id="segment-spinner" class="hidden"><svg class="w-4 h-4 spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83"/></svg></span>
+        Generate Segment Prompts
+      </button>
+      <p id="script-pace-warning" class="text-xs text-amber-500/90 mt-2 hidden"></p>
+    </section>
+
+    <!-- ── STEP 4: SEGMENTS ── -->
+    <section id="step-segments" class="step-card bg-surface-2 rounded-xl border border-white/5 p-5 hidden">
+      <h2 class="font-semibold flex items-center gap-2 mb-1">
+        <span class="bg-accent/20 text-accent text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">4</span>
+        Video Segments &amp; Prompts
+      </h2>
+      <p class="text-xs text-gray-500 mb-4">One card = one Seeddance generation. Edit anything, then <strong class="text-gray-400 font-medium">Copy for Seeddance</strong> — you get the full prompt, camera notes, end-frame handoff, and spoken script in one paste.</p>
+
+      <!-- Style Lock -->
+      <div id="style-lock" class="bg-surface-3 border border-accent/20 rounded-lg p-4 mb-4 hidden">
+        <div class="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-accent mb-1">Style Lock</h3>
+            <p class="text-xs text-gray-500">Visual constants for every segment — character, wardrobe, lighting, etc. Edit if needed, then copy once and reference while generating.</p>
+          </div>
+          <button type="button" onclick="copyStyleLock()" class="copy-btn relative shrink-0 text-xs font-medium text-accent hover:text-accent-light transition px-2 py-1">Copy style lock</button>
+        </div>
+        <div id="style-lock-content" class="space-y-3"></div>
+      </div>
+
+      <div id="segments-container" class="space-y-4"></div>
+
+      <!-- Export row -->
+      <div class="flex flex-wrap gap-3 mt-6">
+        <button onclick="downloadAllPrompts()" class="bg-surface-3 hover:bg-surface-4 border border-white/10 text-sm px-4 py-2 rounded-lg transition">
+          📋 Download All Prompts
+        </button>
+        <button onclick="downloadSRT('viral')" class="bg-surface-3 hover:bg-surface-4 border border-white/10 text-sm px-4 py-2 rounded-lg transition">
+          📄 Download SRT (viral captions)
+        </button>
+        <button onclick="downloadSRT('standard')" class="bg-surface-3 hover:bg-surface-4 border border-white/10 text-sm px-4 py-2 rounded-lg transition">
+          📄 Download SRT (standard)
+        </button>
+        <button onclick="downloadFullExport()" class="bg-accent hover:bg-accent-light text-white text-sm px-5 py-2 rounded-lg transition font-medium">
+          ⬇ Full Export (.txt)
+        </button>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<!-- ===== TOAST ===== -->
+<div id="toast" class="fixed bottom-6 right-6 bg-red-600/90 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg hidden max-w-sm z-50"></div>
+
+<!-- ===================================================================== -->
+<script>
+// ── State ──
+let uploadedFile = null;
+let whisperData = null;   // { text, segments, words, duration }
+let segmentData = null;    // { style_lock, segments }
+let referenceImages = [];  // { id, preview, base64, media_type, name }
+let originalAdWpm = null;  // WPM measured from uploaded ad (per ad, not saved)
+let rewriteMeta = null;     // { meta, segments } from /api/rewrite
+const MAX_REF_IMAGES = 5;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const WHISPER_LIMIT_BYTES = 25 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+
+// ── Brand persistence (tone is per-ad, not saved here) ──
+function loadBrand() {
+  try {
+    const b = JSON.parse(localStorage.getItem('adremix_brand') || '{}');
+    if (b.brand_name) document.getElementById('brand_name').value = b.brand_name;
+    if (b.product_description) document.getElementById('product_description').value = b.product_description;
+    if (b.target_audience) document.getElementById('target_audience').value = b.target_audience;
+    if (b.segment_length) document.getElementById('segment_length').value = b.segment_length;
+  } catch {}
+}
+function saveBrand() {
+  const b = getBrand();
+  localStorage.setItem('adremix_brand', JSON.stringify(b));
+  const el = document.getElementById('brand-saved');
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 1500);
+}
+function getBrand() {
+  return {
+    brand_name: document.getElementById('brand_name').value.trim(),
+    product_description: document.getElementById('product_description').value.trim(),
+    target_audience: document.getElementById('target_audience').value.trim(),
+    segment_length: parseInt(document.getElementById('segment_length').value) || 15,
+  };
+}
+loadBrand();
+
+document.getElementById('segment_length').addEventListener('input', () => {
+  updateSpeechPaceUI();
+  updateScriptPaceWarning();
+});
+
+function chunkCountColor(wc, target) {
+  const diff = Math.abs(wc - target);
+  if (diff <= 5) return 'text-green-400';
+  if (diff <= 8) return 'text-amber-400/90';
+  return 'text-red-400/90';
+}
+
+function getRewriteChunksFromDOM() {
+  if (!rewriteMeta?.segments) return [];
+  return rewriteMeta.segments.map((seg, i) => ({
+    segment_number: seg.segment_number,
+    start_time: seg.start_time,
+    end_time: seg.end_time,
+    transcript: document.getElementById(`rewrite-chunk-${i}`)?.value.trim() || '',
+  }));
+}
+
+function getChunkWordTarget(index) {
+  const targets = rewriteMeta?.meta?.segment_word_targets;
+  if (targets?.[index] != null) return targets[index];
+  return rewriteMeta?.meta?.words_per_segment || 0;
+}
+
+function updateRewriteChunkCount(index) {
+  if (!rewriteMeta?.meta) return;
+  const target = getChunkWordTarget(index);
+  const wc = countWords(document.getElementById(`rewrite-chunk-${index}`)?.value || '');
+  const countEl = document.getElementById(`rewrite-chunk-count-${index}`);
+  if (countEl) {
+    countEl.textContent = `${wc} words · target ~${target} (±5)`;
+    countEl.className = `text-xs tabular-nums ${chunkCountColor(wc, target)}`;
+  }
+  updateScriptPaceWarning();
+}
+
+function renderRewriteChunks(segments, meta) {
+  const container = document.getElementById('rewrite-chunks-container');
+  const summary = document.getElementById('rewrite-plan-summary');
+  const targets = meta.segment_word_targets || segments.map(() => meta.words_per_segment);
+  const totalTol = (meta.total_word_max ?? meta.total_word_target + 20) - meta.total_word_target;
+  summary.textContent =
+    `${meta.num_segments} segments × ${meta.segment_length}s (~${meta.effective_duration}s total) · ` +
+    `${meta.original_word_count} words original → rewrite ~${meta.total_word_target} (±${totalTol}) · ` +
+    `@ ${meta.target_wpm} WPM`;
+
+  summary.classList.remove('hidden');
+
+  container.innerHTML = segments.map((seg, i) => {
+    const target = targets[i] ?? meta.words_per_segment;
+    return `
+    <div class="bg-surface-3 border border-white/10 rounded-lg p-4">
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <span class="text-xs font-medium text-gray-400">Segment ${seg.segment_number} · ${escHtml(seg.start_time)} → ${escHtml(seg.end_time)}</span>
+        <span id="rewrite-chunk-count-${i}" class="text-xs tabular-nums ${chunkCountColor(seg.word_count, target)}">${seg.word_count} words · target ~${target} (±5)</span>
+      </div>
+      <textarea id="rewrite-chunk-${i}" rows="4"
+        class="w-full bg-surface-2 border border-white/10 rounded-lg px-3 py-2 text-sm leading-relaxed italic"
+        oninput="updateRewriteChunkCount(${i})">${escHtml(seg.transcript)}</textarea>
+    </div>
+  `;
+  }).join('');
+}
+
+function countWords(text) {
+  return (text || '').trim().split(/\s+/).filter(Boolean).length;
+}
+
+function calcWpm(wordCount, durationSec) {
+  if (!durationSec || durationSec <= 0) return 150;
+  return Math.round((wordCount / durationSec) * 60);
+}
+
+function getTargetWpm() {
+  const el = document.getElementById('speech_wpm');
+  return parseInt(el?.value || '150', 10);
+}
+
+function setupSpeechPaceFromTranscript() {
+  if (!whisperData?.duration) return;
+  const words = countWords(whisperData.text);
+  originalAdWpm = calcWpm(words, whisperData.duration);
+
+  const slider = document.getElementById('speech_wpm');
+  const min = Math.max(90, Math.round(originalAdWpm * 0.75));
+  const max = Math.min(220, Math.round(originalAdWpm * 1.25));
+  slider.min = min;
+  slider.max = max;
+  slider.value = originalAdWpm;
+
+  document.getElementById('speech-pace-section').classList.remove('hidden');
+  updateSpeechPaceUI();
+  updateScriptPaceWarning();
+}
+
+function updateSpeechPaceUI() {
+  if (!whisperData || originalAdWpm == null) return;
+  const wpm = getTargetWpm();
+  const segLen = parseInt(document.getElementById('segment_length').value, 10) || 15;
+  const wordsPerSeg = Math.round((wpm / 60) * segLen);
+  const origWords = countWords(whisperData.text);
+
+  document.getElementById('speech-wpm-value').textContent = `${wpm} WPM`;
+  document.getElementById('speech-wpm-baseline').textContent =
+    `Matched to your upload: ~${originalAdWpm} WPM (${origWords} words in ${whisperData.duration}s). Slide only if you want slower or faster.`;
+  document.getElementById('speech-wpm-hint').textContent =
+    `~${wordsPerSeg} words/${segLen}s at this WPM · script length stays near original (${origWords} ±20 words).`;
+}
+
+function updateScriptPaceWarning() {
+  const warn = document.getElementById('script-pace-warning');
+  if (!warn || !rewriteMeta?.meta) {
+    warn?.classList.add('hidden');
+    return;
+  }
+
+  const chunks = getRewriteChunksFromDOM();
+  const targets = rewriteMeta.meta.segment_word_targets || [];
+  const total = chunks.reduce((sum, c) => sum + countWords(c.transcript), 0);
+  const budget = rewriteMeta.meta.total_word_target;
+  const totalTol = (rewriteMeta.meta.total_word_max ?? budget + 20) - budget;
+  const minWords = rewriteMeta.meta.total_word_min ?? budget - totalTol;
+  const maxWords = rewriteMeta.meta.total_word_max ?? budget + totalTol;
+  const offPace = chunks.filter((c, i) => {
+    const target = targets[i] ?? rewriteMeta.meta.words_per_segment;
+    return Math.abs(countWords(c.transcript) - target) > 5;
+  }).length;
+
+  if (total < minWords) {
+    warn.textContent = `Total script is ${total} words — target is ${budget} ±${totalTol} (min ${minWords}). Add copy or lower the pace slider.`;
+    warn.classList.remove('hidden');
+  } else if (total > maxWords) {
+    warn.textContent = `Total script is ${total} words — target is ${budget} ±${totalTol} (max ${maxWords}). Trim copy to match original pacing.`;
+    warn.classList.remove('hidden');
+  } else if (offPace >= 2) {
+    warn.textContent = `${offPace} segments are outside their word targets (±5). Rebalance chunks — don't pile extra words into the last segment.`;
+    warn.classList.remove('hidden');
+  } else {
+    warn.classList.add('hidden');
+  }
+}
+
+// ── File upload ──
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
+
+function handleFile(file) {
+  if (file.size > MAX_UPLOAD_BYTES) return showToast('File must be under 500 MB.');
+  uploadedFile = file;
+  resetAdInputs();
+  const el = document.getElementById('file-name');
+  const mb = (file.size / 1024 / 1024).toFixed(1);
+  el.textContent = `${file.name} (${mb} MB)`;
+  el.classList.remove('hidden');
+  const largeHint = document.getElementById('file-large-hint');
+  if (file.size > WHISPER_LIMIT_BYTES) {
+    largeHint.classList.remove('hidden');
+  } else {
+    largeHint.classList.add('hidden');
+  }
+  document.getElementById('transcribe-status').classList.add('hidden');
+  document.getElementById('btn-transcribe').disabled = false;
+  document.getElementById('step-transcript').classList.add('hidden');
+  document.getElementById('step-rewrite').classList.add('hidden');
+  document.getElementById('step-segments').classList.add('hidden');
+  whisperData = null;
+  segmentData = null;
+}
+
+function resetAdInputs() {
+  document.getElementById('ad_tone').value = '';
+  document.getElementById('visual-description').value = '';
+  clearReferenceImages();
+  originalAdWpm = null;
+  rewriteMeta = null;
+  document.getElementById('rewrite-chunks-container').innerHTML = '';
+  document.getElementById('rewrite-plan-summary')?.classList.add('hidden');
+  document.getElementById('speech-pace-section').classList.add('hidden');
+  document.getElementById('script-pace-warning')?.classList.add('hidden');
+}
+
+// ── Reference image upload ──
+const refImagesDrop = document.getElementById('ref-images-drop');
+const refImagesInput = document.getElementById('ref-images-input');
+
+refImagesDrop.addEventListener('click', () => refImagesInput.click());
+refImagesDrop.addEventListener('dragover', e => { e.preventDefault(); refImagesDrop.classList.add('dragover'); });
+refImagesDrop.addEventListener('dragleave', () => refImagesDrop.classList.remove('dragover'));
+refImagesDrop.addEventListener('drop', e => {
+  e.preventDefault();
+  refImagesDrop.classList.remove('dragover');
+  if (e.dataTransfer.files.length) addReferenceImages(e.dataTransfer.files);
+});
+refImagesInput.addEventListener('change', () => {
+  if (refImagesInput.files.length) addReferenceImages(refImagesInput.files);
+  refImagesInput.value = '';
+});
+
+document.getElementById('visual-description').addEventListener('paste', (e) => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+
+  const imageFiles = [];
+  const ts = Date.now();
+  let n = 0;
+  for (const item of items) {
+    if (!item.type.startsWith('image/')) continue;
+    const blob = item.getAsFile();
+    if (!blob) continue;
+    const ext = (item.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    n += 1;
+    imageFiles.push(new File([blob], `pasted-${ts}-${n}.${ext}`, { type: item.type }));
+  }
+
+  if (imageFiles.length === 0) return;
+
+  e.preventDefault();
+  const dt = new DataTransfer();
+  imageFiles.forEach(f => dt.items.add(f));
+  addReferenceImages(dt.files);
+});
+
+async function addReferenceImages(fileList) {
+  const remaining = MAX_REF_IMAGES - referenceImages.length;
+  if (remaining <= 0) return showToast(`Maximum ${MAX_REF_IMAGES} reference images.`);
+
+  for (const file of Array.from(fileList).slice(0, remaining)) {
+    if (!file.type.startsWith('image/')) {
+      showToast(`${file.name} is not an image.`);
+      continue;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      showToast(`${file.name} must be under 5 MB.`);
+      continue;
+    }
+    try {
+      const base64 = await fileToBase64(file);
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      referenceImages.push({
+        id,
+        preview: URL.createObjectURL(file),
+        base64,
+        media_type: file.type || 'image/jpeg',
+        name: file.name,
+      });
+    } catch {
+      showToast(`Could not read ${file.name}.`);
+    }
+  }
+  renderReferenceImages();
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function removeReferenceImage(id) {
+  const img = referenceImages.find(i => i.id === id);
+  if (img?.preview) URL.revokeObjectURL(img.preview);
+  referenceImages = referenceImages.filter(i => i.id !== id);
+  renderReferenceImages();
+}
+
+function clearReferenceImages() {
+  referenceImages.forEach(img => { if (img.preview) URL.revokeObjectURL(img.preview); });
+  referenceImages = [];
+  renderReferenceImages();
+}
+
+function renderReferenceImages() {
+  const container = document.getElementById('ref-images-preview');
+  container.innerHTML = referenceImages.map(img => `
+    <div class="relative group">
+      <img src="${img.preview}" alt="${escHtml(img.name)}" class="w-24 h-24 object-cover rounded-lg border border-white/10" />
+      <button type="button" onclick="removeReferenceImage('${img.id}')"
+        class="absolute -top-2 -right-2 w-6 h-6 bg-red-600 hover:bg-red-500 text-white text-xs rounded-full opacity-0 group-hover:opacity-100 transition"
+        title="Remove">×</button>
+      <p class="text-[10px] text-gray-600 mt-1 w-24 truncate">${escHtml(img.name)}</p>
+    </div>
+  `).join('');
+}
+
+// ── API helpers ──
+async function apiPost(url, body, isForm = false) {
+  const opts = { method: 'POST' };
+  if (isForm) {
+    opts.body = body; // FormData
+  } else {
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(url, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(formatApiError(err.detail, res.statusText));
+  }
+  return res.json();
+}
+
+function formatApiError(detail, fallback) {
+  if (!detail) return fallback || 'Request failed';
+  if (typeof detail === 'string') return detail;
+  const parts = [detail.message || 'Request failed'];
+  if (detail.issues?.length) parts.push(...detail.issues.map(i => `• ${i}`));
+  if (detail.debug) parts.push(detail.debug);
+  return parts.join('\n');
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  t.style.whiteSpace = msg.includes('\n') ? 'pre-wrap' : '';
+  setTimeout(() => t.classList.add('hidden'), 8000);
+}
+
+function setLoading(btnId, spinnerId, loading) {
+  document.getElementById(btnId).disabled = loading;
+  document.getElementById(spinnerId).classList.toggle('hidden', !loading);
+}
+
+// ── Step 1: Transcribe ──
+async function runTranscribe() {
+  if (!uploadedFile) return;
+  const statusEl = document.getElementById('transcribe-status');
+  const labelEl = document.getElementById('transcribe-label');
+  const needsCompress = uploadedFile.size > WHISPER_LIMIT_BYTES;
+
+  setLoading('btn-transcribe', 'transcribe-spinner', true);
+  if (needsCompress) {
+    labelEl.textContent = 'Compressing audio…';
+    statusEl.textContent = 'Extracting full audio track and compressing for Whisper (nothing trimmed)…';
+    statusEl.classList.remove('hidden');
+  } else {
+    labelEl.textContent = 'Transcribing…';
+    statusEl.classList.add('hidden');
+  }
+
+  try {
+    const fd = new FormData();
+    fd.append('file', uploadedFile);
+    if (needsCompress) labelEl.textContent = 'Transcribing…';
+    whisperData = await apiPost('/api/transcribe', fd, true);
+
+    document.getElementById('transcript-text').value = whisperData.text;
+    document.getElementById('duration-badge').textContent = `${whisperData.duration}s`;
+    document.getElementById('word-count-badge').textContent = `${whisperData.text.split(/\s+/).length} words`;
+    if (whisperData.compressed) {
+      statusEl.textContent = `Compressed ${whisperData.original_size_mb} MB → ${whisperData.audio_size_mb} MB audio, then transcribed.`;
+      statusEl.classList.remove('hidden');
+    } else {
+      statusEl.classList.add('hidden');
+    }
+    document.getElementById('step-transcript').classList.remove('hidden');
+    document.getElementById('step-transcript').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setupSpeechPaceFromTranscript();
+  } catch (e) {
+    showToast(e.message);
+    statusEl.classList.add('hidden');
+  } finally {
+    labelEl.textContent = 'Transcribe';
+    setLoading('btn-transcribe', 'transcribe-spinner', false);
+  }
+}
+
+// ── Step 2: Rewrite ──
+async function runRewrite() {
+  const brand = getBrand();
+  if (!brand.brand_name) return showToast('Set your brand name in the sidebar first.');
+  const transcript = document.getElementById('transcript-text').value.trim();
+  if (!transcript) return;
+  const tone = document.getElementById('ad_tone').value.trim();
+  if (!tone) return showToast('Describe the tone/voice for this ad before rewriting.');
+
+  if (!whisperData?.duration) return showToast('Transcribe the ad first so we can calculate speech pace.');
+  if (originalAdWpm == null) return showToast('Speech pace not ready — transcribe again or refresh.');
+
+  setLoading('btn-rewrite', 'rewrite-spinner', true);
+  try {
+    const res = await apiPost('/api/rewrite', {
+      transcript,
+      tone,
+      ...brand,
+      duration: whisperData.duration,
+      target_wpm: getTargetWpm(),
+    });
+    rewriteMeta = { meta: res.meta, segments: res.segments };
+    renderRewriteChunks(res.segments, res.meta);
+    document.getElementById('step-rewrite').classList.remove('hidden');
+    document.getElementById('step-rewrite').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    updateScriptPaceWarning();
+  } catch (e) {
+    showToast(e.message);
+  } finally {
+    setLoading('btn-rewrite', 'rewrite-spinner', false);
+  }
+}
+
+// ── Step 3: Segment ──
+async function runSegment() {
+  const brand = getBrand();
+  const script_chunks = getRewriteChunksFromDOM();
+  if (!script_chunks.length) return showToast('Rewrite the script first.');
+  if (script_chunks.some(c => !c.transcript)) return showToast('Every script segment needs text before generating prompts.');
+
+  const tone = document.getElementById('ad_tone').value.trim();
+  const visual_description = document.getElementById('visual-description').value.trim();
+  const reference_images = referenceImages.map(img => ({
+    media_type: img.media_type,
+    data: img.base64,
+  }));
+
+  setLoading('btn-segment', 'segment-spinner', true);
+  try {
+    segmentData = await apiPost('/api/segment', {
+      script_chunks,
+      effective_duration: rewriteMeta?.meta?.effective_duration || whisperData?.duration || 60,
+      brand_name: brand.brand_name,
+      product_description: brand.product_description,
+      segment_length: brand.segment_length,
+      tone,
+      visual_description,
+      reference_images,
+      target_wpm: getTargetWpm(),
+    });
+
+    renderSegments(segmentData);
+    document.getElementById('step-segments').classList.remove('hidden');
+    document.getElementById('step-segments').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    showToast(e.message);
+  } finally {
+    setLoading('btn-segment', 'segment-spinner', false);
+  }
+}
+
+// ── Render segments ──
+const STYLE_LOCK_LABELS = {
+  character: 'Character',
+  wardrobe: 'Wardrobe',
+  lighting: 'Lighting',
+  color_grade: 'Color grade',
+  visual_style: 'Visual style',
+  delivery: 'Delivery / tone',
+};
+
+function renderSegments(data) {
+  if (data.style_lock) {
+    const lockEl = document.getElementById('style-lock');
+    const content = document.getElementById('style-lock-content');
+    lockEl.classList.remove('hidden');
+    content.innerHTML = Object.entries(data.style_lock)
+      .map(([k, v]) => `
+        <label class="block">
+          <span class="text-xs text-gray-400 mb-1 block">${STYLE_LOCK_LABELS[k] || k.replace(/_/g, ' ')}</span>
+          <textarea id="style-${k}" rows="${k === 'character' ? 3 : 2}"
+            class="w-full bg-surface-2 border border-white/10 rounded px-3 py-2 text-xs leading-relaxed">${escHtml(v)}</textarea>
+        </label>
+      `).join('');
+  }
+
+  const container = document.getElementById('segments-container');
+  container.innerHTML = '';
+
+  data.segments.forEach((seg, i) => {
+    const card = document.createElement('div');
+    card.className = 'segment-card bg-surface-3 border border-white/10 rounded-lg p-4 transition';
+    card.innerHTML = `
+      <div class="flex items-center justify-between gap-3 mb-4 pb-3 border-b border-white/5">
+        <div class="flex items-center gap-2">
+          <span class="bg-accent text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">${seg.segment_number}</span>
+          <span class="text-xs text-gray-500">${escHtml(seg.start_time)} → ${escHtml(seg.end_time)}</span>
+        </div>
+        <button type="button" onclick="copySegmentPrompt(${i})"
+          class="copy-segment-btn copy-btn relative shrink-0 text-xs font-medium text-accent hover:text-accent-light transition px-2 py-1">
+          Copy for Seeddance
+        </button>
+      </div>
+
+      <label class="block mb-3">
+        <span class="text-xs text-gray-400 mb-0.5 block">Seeddance prompt</span>
+        <span class="text-[11px] text-gray-600 block mb-1.5">Main visual scene — action, setting, mood, style tags.</span>
+        <textarea id="prompt-${i}" rows="5"
+          class="w-full bg-surface-2 border border-white/10 rounded px-3 py-2 text-sm leading-relaxed">${escHtml(seg.seeddance_prompt)}</textarea>
+      </label>
+
+      <label class="block mb-3">
+        <span class="text-xs text-gray-400 mb-0.5 block">📷 Camera &amp; movement</span>
+        <span class="text-[11px] text-gray-600 block mb-1.5">Shot type and camera motion for this clip (e.g. medium close-up, slow push-in). Included in your copy.</span>
+        <textarea id="camera-${i}" rows="2"
+          class="w-full bg-surface-2 border border-white/10 rounded px-3 py-2 text-sm">${escHtml(seg.camera || '')}</textarea>
+      </label>
+
+      <label class="block mb-3">
+        <span class="text-xs text-gray-400 mb-0.5 block">🔗 End frame / handoff</span>
+        <span class="text-[11px] text-gray-600 block mb-1.5">How the last frame should look so the next segment connects. Included in your copy.</span>
+        <textarea id="transition-${i}" rows="2"
+          class="w-full bg-surface-2 border border-white/10 rounded px-3 py-2 text-sm">${escHtml(seg.transition_out || '')}</textarea>
+      </label>
+
+      <label class="block">
+        <span class="text-xs text-gray-400 mb-0.5 block">Spoken script</span>
+        <span class="text-[11px] text-gray-600 block mb-1.5">Words for this segment — appended at the bottom of your copied prompt for VO sync.</span>
+        <textarea id="script-${i}" rows="3"
+          class="w-full bg-surface-2 border border-white/10 rounded px-3 py-2 text-sm italic">${escHtml(seg.transcript || '')}</textarea>
+      </label>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+function getStyleLockText() {
+  if (!segmentData?.style_lock) return '';
+  return Object.keys(segmentData.style_lock)
+    .map(k => {
+      const val = document.getElementById(`style-${k}`)?.value.trim() || '';
+      const label = STYLE_LOCK_LABELS[k] || k.replace(/_/g, ' ');
+      return `${label}: ${val}`;
+    })
+    .join('\n');
+}
+
+function buildSegmentCopyText(index) {
+  const prompt = document.getElementById(`prompt-${index}`)?.value.trim() || '';
+  const camera = document.getElementById(`camera-${index}`)?.value.trim() || '';
+  const transition = document.getElementById(`transition-${index}`)?.value.trim() || '';
+  const script = document.getElementById(`script-${index}`)?.value.trim() || '';
+
+  const parts = [prompt];
+  if (camera) parts.push(`Camera: ${camera}`);
+  if (transition) parts.push(`End frame: ${transition}`);
+
+  let text = parts.join('\n\n');
+  if (script) {
+    text += `\n\nScript for the video should follow this word for word:\n${script}`;
+  }
+  return text;
+}
+
+function flashCopied(btn) {
+  if (!btn) return;
+  btn.classList.add('copied');
+  setTimeout(() => btn.classList.remove('copied'), 1200);
+}
+
+async function copyText(text, btn) {
+  await navigator.clipboard.writeText(text);
+  flashCopied(btn);
+}
+
+function copyStyleLock() {
+  const text = getStyleLockText();
+  if (!text) return showToast('Nothing to copy.');
+  const btn = document.querySelector('#style-lock .copy-btn');
+  copyText(`STYLE LOCK — keep consistent across every segment:\n\n${text}`, btn);
+}
+
+function copySegmentPrompt(index) {
+  const text = buildSegmentCopyText(index);
+  if (!text.trim()) return showToast('Nothing to copy.');
+  const btns = document.querySelectorAll('.copy-segment-btn');
+  copyText(text, btns[index]);
+}
+
+function downloadFile(filename, content, type = 'text/plain') {
+  const blob = new Blob([content], { type });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function downloadAllPrompts() {
+  if (!segmentData) return;
+  let txt = '=== STYLE LOCK ===\n';
+  txt += getStyleLockText() + '\n\n';
+  segmentData.segments.forEach((seg, i) => {
+    txt += `=== SEGMENT ${seg.segment_number} (${seg.start_time} → ${seg.end_time}) ===\n`;
+    txt += buildSegmentCopyText(i) + '\n\n';
+  });
+  downloadFile('adremix-prompts.txt', txt);
+}
+
+async function downloadSRT(style) {
+  if (!whisperData && !segmentData) return;
+  try {
+    const editedSegments = segmentData?.segments?.map((seg, i) => ({
+      ...seg,
+      transcript: document.getElementById(`script-${i}`)?.value.trim() || seg.transcript,
+    })) || [];
+    const body = {
+      words: whisperData?.words || [],
+      segments: editedSegments,
+      style,
+    };
+    const res = await apiPost('/api/generate-srt', body);
+    downloadFile(`captions-${style}.srt`, res.srt);
+  } catch (e) {
+    showToast(e.message);
+  }
+}
+
+function downloadFullExport() {
+  if (!segmentData) return;
+  let txt = `AdRemix Export — ${new Date().toLocaleDateString()}\n`;
+  txt += `${'='.repeat(50)}\n\n`;
+
+  const brand = getBrand();
+  txt += `BRAND: ${brand.brand_name}\n`;
+  txt += `PRODUCT: ${brand.product_description}\n`;
+  txt += `AUDIENCE: ${brand.target_audience}\n`;
+  txt += `TONE (this ad): ${document.getElementById('ad_tone').value.trim()}\n`;
+  const visualDesc = document.getElementById('visual-description').value.trim();
+  if (visualDesc) txt += `VISUAL REFERENCE: ${visualDesc}\n`;
+  if (referenceImages.length) txt += `REFERENCE IMAGES: ${referenceImages.length} uploaded\n`;
+  txt += `\n`;
+
+  txt += `ORIGINAL TRANSCRIPT:\n${document.getElementById('transcript-text').value}\n\n`;
+  txt += `REWRITTEN SCRIPT (by segment):\n`;
+  getRewriteChunksFromDOM().forEach((c, i) => {
+    txt += `\n--- Segment ${c.segment_number} (${c.start_time} → ${c.end_time}) ---\n${c.transcript}\n`;
+  });
+  txt += `\n`;
+
+  txt += `${'='.repeat(50)}\n`;
+  txt += `STYLE LOCK\n`;
+  txt += `${'='.repeat(50)}\n`;
+  txt += getStyleLockText() + '\n\n';
+
+  segmentData.segments.forEach((seg, i) => {
+    txt += `${'─'.repeat(50)}\n`;
+    txt += `SEGMENT ${seg.segment_number} · ${seg.start_time} → ${seg.end_time}\n`;
+    txt += `${'─'.repeat(50)}\n`;
+    txt += buildSegmentCopyText(i) + '\n\n';
+  });
+
+  downloadFile(`adremix-export-${Date.now()}.txt`, txt);
+}
+</script>
+</body>
+</html>

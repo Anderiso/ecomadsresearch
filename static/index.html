@@ -34,6 +34,31 @@ tailwind.config = {
   .copy-btn::after { content: 'Copied!'; position: absolute; right: 0; top: -24px;
     font-size: 11px; color: #6d5cff; opacity: 0; transition: opacity .2s; }
   .copy-btn.copied::after { opacity: 1; }
+  .dual-range { position: relative; height: 36px; margin: 8px 0 4px; }
+  .dual-range-track {
+    position: absolute; left: 0; right: 0; top: 50%; height: 4px;
+    transform: translateY(-50%); background: #2a2a2a; border-radius: 2px;
+  }
+  .dual-range-fill {
+    position: absolute; top: 50%; height: 4px; transform: translateY(-50%);
+    background: #6d5cff; border-radius: 2px; pointer-events: none;
+  }
+  .dual-range input[type=range] {
+    position: absolute; left: 0; right: 0; top: 50%; width: 100%; margin: 0;
+    transform: translateY(-50%); background: none; pointer-events: none;
+    -webkit-appearance: none; appearance: none; height: 0;
+  }
+  .dual-range input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 16px; height: 16px; border-radius: 50%; background: #6d5cff;
+    border: 2px solid #fff; cursor: pointer; pointer-events: auto;
+    margin-top: -6px;
+  }
+  .dual-range input[type=range]::-moz-range-thumb {
+    width: 16px; height: 16px; border-radius: 50%; background: #6d5cff;
+    border: 2px solid #fff; cursor: pointer; pointer-events: auto;
+  }
+  .dual-range.is-disabled { opacity: 0.4; pointer-events: none; }
 </style>
 </head>
 
@@ -186,6 +211,34 @@ tailwind.config = {
         <div id="ref-images-preview" class="flex flex-wrap gap-3 mt-3"></div>
       </div>
 
+      <div class="mt-5 pt-5 border-t border-white/5">
+        <div class="flex items-center justify-between gap-3 mb-2">
+          <h3 class="text-sm font-medium">Visual beats per segment</h3>
+          <label class="flex items-center gap-2 cursor-pointer shrink-0">
+            <input id="beat_requirement_enabled" type="checkbox" checked
+              class="accent-accent w-4 h-4 cursor-pointer" onchange="updateBeatRangeUI()" />
+            <span class="text-xs text-gray-400">Require beats</span>
+          </label>
+        </div>
+        <p class="text-xs text-gray-500 mb-2">How many mini-scenes inside each ~15s Seeddance clip. Drag both handles to set min–max (0–10).</p>
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs text-gray-400">Beats per segment</span>
+          <span id="beat-range-value" class="text-xs text-accent font-semibold tabular-nums">2 – 5</span>
+        </div>
+        <div id="beat-range-wrap" class="dual-range">
+          <div class="dual-range-track"></div>
+          <div id="beat-range-fill" class="dual-range-fill"></div>
+          <input id="beat_min" type="range" min="0" max="10" value="2" step="1"
+            class="accent-accent" oninput="onBeatRangeInput('min')" />
+          <input id="beat_max" type="range" min="0" max="10" value="5" step="1"
+            class="accent-accent" oninput="onBeatRangeInput('max')" />
+        </div>
+        <div class="flex justify-between text-[10px] text-gray-600 mt-1">
+          <span>0 (single shot)</span>
+          <span>10 (dense)</span>
+        </div>
+      </div>
+
       <button id="btn-segment" onclick="runSegment()"
         class="mt-3 w-full bg-accent hover:bg-accent-light text-white text-sm font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-2">
         <span id="segment-spinner" class="hidden"><svg class="w-4 h-4 spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83"/></svg></span>
@@ -200,7 +253,7 @@ tailwind.config = {
         <span class="bg-accent/20 text-accent text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">4</span>
         Video Segments &amp; Prompts
       </h2>
-      <p class="text-xs text-gray-500 mb-4">One card = one Seeddance generation. Edit anything, then <strong class="text-gray-400 font-medium">Copy for Seeddance</strong> — you get the full prompt, camera notes, end-frame handoff, and spoken script in one paste.</p>
+      <p class="text-xs text-gray-500 mb-4">One card = one Seeddance generation (~15s). Each prompt should choreograph <strong class="text-gray-400 font-medium">multiple beats/scenes inside that clip</strong> — edit anything, then <strong class="text-gray-400 font-medium">Copy for Seeddance</strong> for the full prompt, camera notes, end-frame handoff, and spoken script.</p>
 
       <!-- Style Lock -->
       <div id="style-lock" class="bg-surface-3 border border-accent/20 rounded-lg p-4 mb-4 hidden">
@@ -284,6 +337,74 @@ document.getElementById('segment_length').addEventListener('input', () => {
   updateSpeechPaceUI();
   updateScriptPaceWarning();
 });
+
+const BEAT_RANGE_KEY = 'adremix_beat_range';
+
+function loadBeatRangeSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(BEAT_RANGE_KEY) || '{}');
+    if (saved.enabled != null) {
+      document.getElementById('beat_requirement_enabled').checked = saved.enabled;
+    }
+    if (saved.min != null) document.getElementById('beat_min').value = saved.min;
+    if (saved.max != null) document.getElementById('beat_max').value = saved.max;
+  } catch {}
+  updateBeatRangeUI();
+}
+
+function saveBeatRangeSettings() {
+  const s = getBeatRangeSettings();
+  localStorage.setItem(BEAT_RANGE_KEY, JSON.stringify(s));
+}
+
+function getBeatRangeSettings() {
+  let min = parseInt(document.getElementById('beat_min').value, 10);
+  let max = parseInt(document.getElementById('beat_max').value, 10);
+  if (min > max) [min, max] = [max, min];
+  return {
+    enabled: document.getElementById('beat_requirement_enabled').checked,
+    min,
+    max,
+  };
+}
+
+function onBeatRangeInput(which) {
+  const minEl = document.getElementById('beat_min');
+  const maxEl = document.getElementById('beat_max');
+  let min = parseInt(minEl.value, 10);
+  let max = parseInt(maxEl.value, 10);
+  if (which === 'min' && min > max) maxEl.value = min;
+  if (which === 'max' && max < min) minEl.value = max;
+  updateBeatRangeUI();
+  saveBeatRangeSettings();
+}
+
+function updateBeatRangeUI() {
+  const enabled = document.getElementById('beat_requirement_enabled').checked;
+  const wrap = document.getElementById('beat-range-wrap');
+  const minEl = document.getElementById('beat_min');
+  const maxEl = document.getElementById('beat_max');
+  let min = parseInt(minEl.value, 10);
+  let max = parseInt(maxEl.value, 10);
+  if (min > max) {
+    min = max;
+    minEl.value = min;
+  }
+
+  const label = min === max ? String(min) : `${min} – ${max}`;
+  document.getElementById('beat-range-value').textContent = enabled ? label : 'Off';
+  wrap.classList.toggle('is-disabled', !enabled);
+
+  const track = wrap;
+  const pct = (v) => (v / 10) * 100;
+  const fill = document.getElementById('beat-range-fill');
+  fill.style.left = pct(min) + '%';
+  fill.style.width = pct(max - min) + '%';
+
+  saveBeatRangeSettings();
+}
+
+loadBeatRangeSettings();
 
 function chunkCountColor(wc, target) {
   const diff = Math.abs(wc - target);
@@ -710,6 +831,7 @@ async function runSegment() {
     media_type: img.media_type,
     data: img.base64,
   }));
+  const beatSettings = getBeatRangeSettings();
 
   setLoading('btn-segment', 'segment-spinner', true);
   try {
@@ -723,6 +845,9 @@ async function runSegment() {
       visual_description,
       reference_images,
       target_wpm: getTargetWpm(),
+      beat_requirement_enabled: beatSettings.enabled,
+      beat_min: beatSettings.min,
+      beat_max: beatSettings.max,
     });
 
     renderSegments(segmentData);
@@ -764,6 +889,7 @@ function renderSegments(data) {
   container.innerHTML = '';
 
   data.segments.forEach((seg, i) => {
+    const showPlacement = segmentHasProductPlacement(i, seg);
     const card = document.createElement('div');
     card.className = 'segment-card bg-surface-3 border border-white/10 rounded-lg p-4 transition';
     card.innerHTML = `
@@ -772,38 +898,45 @@ function renderSegments(data) {
           <span class="bg-accent text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">${seg.segment_number}</span>
           <span class="text-xs text-gray-500">${escHtml(seg.start_time)} → ${escHtml(seg.end_time)}</span>
         </div>
-        <button type="button" onclick="copySegmentPrompt(${i})"
-          class="copy-segment-btn copy-btn relative shrink-0 text-xs font-medium text-accent hover:text-accent-light transition px-2 py-1">
-          Copy for Seeddance
-        </button>
+        <div class="flex items-center gap-2 shrink-0">
+          ${productPlacementPillHtml(i, showPlacement)}
+          <button type="button" onclick="copySegmentPrompt(${i})"
+            class="copy-segment-btn copy-btn relative shrink-0 text-xs font-medium text-accent hover:text-accent-light transition px-2 py-1">
+            Copy for Seeddance
+          </button>
+        </div>
       </div>
 
       <label class="block mb-3">
         <span class="text-xs text-gray-400 mb-0.5 block">Seeddance prompt</span>
-        <span class="text-[11px] text-gray-600 block mb-1.5">Main visual scene — action, setting, mood, style tags.</span>
-        <textarea id="prompt-${i}" rows="5"
-          class="w-full bg-surface-2 border border-white/10 rounded px-3 py-2 text-sm leading-relaxed">${escHtml(seg.seeddance_prompt)}</textarea>
+        <span class="text-[11px] text-gray-600 block mb-1.5">Beat-by-beat shot list for the full clip — multiple scenes with cuts/transitions inside one 15s generation.</span>
+        <textarea id="prompt-${i}" rows="7"
+          class="w-full bg-surface-2 border border-white/10 rounded px-3 py-2 text-sm leading-relaxed"
+          oninput="updateProductPlacementPill(${i})">${escHtml(seg.seeddance_prompt)}</textarea>
       </label>
 
       <label class="block mb-3">
         <span class="text-xs text-gray-400 mb-0.5 block">📷 Camera &amp; movement</span>
-        <span class="text-[11px] text-gray-600 block mb-1.5">Shot type and camera motion for this clip (e.g. medium close-up, slow push-in). Included in your copy.</span>
+        <span class="text-[11px] text-gray-600 block mb-1.5">Overall camera language plus any per-beat shifts (e.g. MCU → wide → product insert).</span>
         <textarea id="camera-${i}" rows="2"
-          class="w-full bg-surface-2 border border-white/10 rounded px-3 py-2 text-sm">${escHtml(seg.camera || '')}</textarea>
+          class="w-full bg-surface-2 border border-white/10 rounded px-3 py-2 text-sm"
+          oninput="updateProductPlacementPill(${i})">${escHtml(seg.camera || '')}</textarea>
       </label>
 
       <label class="block mb-3">
         <span class="text-xs text-gray-400 mb-0.5 block">🔗 End frame / handoff</span>
         <span class="text-[11px] text-gray-600 block mb-1.5">How the last frame should look so the next segment connects. Included in your copy.</span>
         <textarea id="transition-${i}" rows="2"
-          class="w-full bg-surface-2 border border-white/10 rounded px-3 py-2 text-sm">${escHtml(seg.transition_out || '')}</textarea>
+          class="w-full bg-surface-2 border border-white/10 rounded px-3 py-2 text-sm"
+          oninput="updateProductPlacementPill(${i})">${escHtml(seg.transition_out || '')}</textarea>
       </label>
 
       <label class="block">
         <span class="text-xs text-gray-400 mb-0.5 block">Spoken script</span>
         <span class="text-[11px] text-gray-600 block mb-1.5">Words for this segment — appended at the bottom of your copied prompt for VO sync.</span>
         <textarea id="script-${i}" rows="3"
-          class="w-full bg-surface-2 border border-white/10 rounded px-3 py-2 text-sm italic">${escHtml(seg.transcript || '')}</textarea>
+          class="w-full bg-surface-2 border border-white/10 rounded px-3 py-2 text-sm italic"
+          oninput="updateProductPlacementPill(${i})">${escHtml(seg.transcript || '')}</textarea>
       </label>
     `;
     container.appendChild(card);
@@ -827,21 +960,67 @@ function getStyleLockText() {
     .join('\n');
 }
 
-function buildSegmentCopyText(index) {
-  const prompt = document.getElementById(`prompt-${index}`)?.value.trim() || '';
-  const camera = document.getElementById(`camera-${index}`)?.value.trim() || '';
-  const transition = document.getElementById(`transition-${index}`)?.value.trim() || '';
-  const script = document.getElementById(`script-${index}`)?.value.trim() || '';
+function buildSegmentCopyTextFromParts(prompt, camera, transition, script) {
+  const p = (prompt || '').trim();
+  const c = (camera || '').trim();
+  const t = (transition || '').trim();
+  const s = (script || '').trim();
 
-  const parts = [prompt];
-  if (camera) parts.push(`Camera: ${camera}`);
-  if (transition) parts.push(`End frame: ${transition}`);
+  const parts = [p];
+  if (c) parts.push(`Camera: ${c}`);
+  if (t) parts.push(`End frame: ${t}`);
 
   let text = parts.join('\n\n');
-  if (script) {
-    text += `\n\nScript for the video should follow this word for word:\n${script}`;
+  if (s) {
+    text += `\n\nScript for the video should follow this word for word:\n${s}`;
   }
   return text;
+}
+
+function buildSegmentCopyText(index) {
+  return buildSegmentCopyTextFromParts(
+    document.getElementById(`prompt-${index}`)?.value,
+    document.getElementById(`camera-${index}`)?.value,
+    document.getElementById(`transition-${index}`)?.value,
+    document.getElementById(`script-${index}`)?.value,
+  );
+}
+
+function getBrandNameForMatch() {
+  return (document.getElementById('brand_name')?.value || '').trim();
+}
+
+function segmentHasProductPlacement(index, seg = null) {
+  const brand = getBrandNameForMatch();
+  if (!brand) return false;
+
+  const promptEl = document.getElementById(`prompt-${index}`);
+  const copyText = promptEl
+    ? buildSegmentCopyText(index)
+    : seg
+      ? buildSegmentCopyTextFromParts(
+          seg.seeddance_prompt,
+          seg.camera,
+          seg.transition_out,
+          seg.transcript,
+        )
+      : '';
+
+  if (!copyText) return false;
+  return copyText.toLowerCase().includes(brand.toLowerCase());
+}
+
+function updateProductPlacementPill(index) {
+  const pill = document.getElementById(`product-placement-${index}`);
+  if (!pill) return;
+  pill.classList.toggle('hidden', !segmentHasProductPlacement(index));
+}
+
+function productPlacementPillHtml(index, visible) {
+  return `<span id="product-placement-${index}"
+    class="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full
+      bg-amber-500/15 text-amber-300/90 border border-amber-500/30 whitespace-nowrap
+      ${visible ? '' : 'hidden'}">Product Placement</span>`;
 }
 
 function flashCopied(btn) {

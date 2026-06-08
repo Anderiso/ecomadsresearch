@@ -963,6 +963,84 @@ async def rewrite(request: Request):
 #    Seeddance prompts and a style-lock for visual consistency
 # ---------------------------------------------------------------------------
 
+def _build_segment_beat_instructions(
+    enabled: bool,
+    beat_min: int,
+    beat_max: int,
+    segment_length: int,
+) -> tuple[str, str]:
+    """Return (main_instruction_block, critical_rules_suffix) for segment prompt."""
+    if not enabled:
+        return (
+            f"""
+Each chunk is one {segment_length}-second Seeddance clip. Describe the full segment in
+seeddance_prompt — action, setting, camera, movement, and mood. No fixed beat count required;
+use as many or as few scene changes as the script naturally needs.""",
+            "",
+        )
+
+    beat_min = max(0, min(10, beat_min))
+    beat_max = max(0, min(10, beat_max))
+    if beat_min > beat_max:
+        beat_min, beat_max = beat_max, beat_min
+
+    range_label = f"{beat_min}–{beat_max}" if beat_min != beat_max else str(beat_min)
+    beat_rule = (
+        f"- Every seeddance_prompt MUST contain {range_label} visual "
+        f"{'beat' if beat_min == beat_max == 1 else 'beats'}"
+        + (" and at least 1 within-segment transition." if beat_max > 1 else ".")
+    )
+
+    if beat_min == 0 and beat_max == 0:
+        beat_body = f"""
+VISUAL BEATS (user setting: {range_label} per segment):
+A single continuous shot with no cutaways is acceptable. Describe one cohesive scene for the
+full {segment_length} seconds."""
+    elif beat_max <= 1:
+        beat_body = f"""
+VISUAL BEATS (user setting: {range_label} per segment):
+Keep each clip to one main visual idea — a single scene or continuous action for the full
+{segment_length} seconds. No multi-beat shot list required."""
+    else:
+        beat_body = f"""
+IMPORTANT — ONE GENERATION PER SEGMENT, MULTIPLE SCENES INSIDE IT:
+Each chunk is a single {segment_length}-second Seeddance clip. The user requires {range_label}
+visual beats per segment (map beats to phrases in the script).
+
+For every segment:
+1. Break the script chunk into {range_label} visual beats (one per phrase or sentence).
+2. Write a mini shot list INSIDE seeddance_prompt: Beat 1 → transition → Beat 2 → …
+3. Use hard cuts, camera shifts, insert shots, gesture changes, and prop reveals BETWEEN beats.
+4. Pace beats to fill the full {segment_length} seconds — no dead air, no single looping action.
+5. End on transition_out so the next segment can connect cleanly.
+
+BAD (too static): "Character stands in studio, gives thumbs up, points to link."
+GOOD (multi-beat): "Beat 1: close-up miming disgust at bloating. Cut to Beat 2: medium shot
+gesturing at gut. Cut to Beat 3: product softgel hero insert. Cut to Beat 4: relieved smile.
+Cut to Beat 5: direct camera point-down to CTA area, hold for end frame." """
+
+    return beat_body, beat_rule
+
+def _build_segment_seeddance_example(enabled: bool, beat_min: int, beat_max: int, segment_length: int) -> str:
+    if not enabled:
+        return (
+            "Self-contained Seeddance prompt. MUST start with the full character description "
+            "from style_lock. Describe action, setting, camera angle, movement, and mood. "
+            "End with style keywords."
+        )
+    beat_max = max(0, min(10, beat_max))
+    if beat_max <= 1:
+        return (
+            f"Start with the full character description from style_lock. One cohesive scene for "
+            f"the full {segment_length}s — action, setting, framing, mood. End with style keywords."
+        )
+    return (
+        f"Start with the full character description from style_lock. Then a BEAT-BY-BEAT shot list "
+        f"for the full {segment_length}s: label each beat (Beat 1, Beat 2, …), describe "
+        "action/setting/framing/mood, and insert Cut to / Smash cut / Push-in / Insert between "
+        "beats. Each beat should map to a phrase in the script. End with style keywords."
+    )
+
 @app.post("/api/segment")
 async def segment(request: Request):
     data = await request.json()
@@ -975,6 +1053,9 @@ async def segment(request: Request):
     visual_description = data.get("visual_description", "")
     reference_images = data.get("reference_images", [])
     target_wpm = data.get("target_wpm")
+    beat_requirement_enabled = bool(data.get("beat_requirement_enabled", True))
+    beat_min = int(data.get("beat_min", 2))
+    beat_max = int(data.get("beat_max", 5))
 
     if not script_chunks:
         raise HTTPException(400, "script_chunks is required")
@@ -1024,6 +1105,28 @@ SPOKEN SCRIPT (fixed — copy verbatim into this segment's transcript field):
     if target_wpm:
         pace_note = f"\nDelivery pace target: ~{target_wpm} WPM (scripts are already time-boxed).\n"
 
+    beat_instructions, beat_critical_rule = _build_segment_beat_instructions(
+        beat_requirement_enabled, beat_min, beat_max, segment_length
+    )
+    seeddance_example = _build_segment_seeddance_example(
+        beat_requirement_enabled, beat_min, beat_max, segment_length
+    )
+    camera_example = (
+        "Overall camera language for the segment AND any per-beat shifts (e.g. Beat 1 MCU → Beat 2 wide → Beat 3 product macro)"
+        if beat_requirement_enabled and beat_max > 1
+        else "Shot type and camera motion for this clip (e.g. medium close-up, slow push-in)"
+    )
+    density_rule = (
+        "- Match visual density to script density — more sentences = more beats.\n"
+        if beat_requirement_enabled and beat_max > 1
+        else ""
+    )
+    length_rule = (
+        "- seeddance_prompt length: roughly 120–220 words (longer when the script chunk is dense).\n"
+        if beat_requirement_enabled and beat_max > 1
+        else "- Keep each seeddance_prompt concise (roughly 80–150 words).\n"
+    )
+
     try:
         prompt_text = f"""You are an expert AI-video production director who specialises in
 creating shot-by-shot breakdowns for AI video generators like Seeddance on Higgsfield.
@@ -1031,6 +1134,7 @@ creating shot-by-shot breakdowns for AI video generators like Seeddance on Higgs
 TASK: The ad script is ALREADY split into fixed {segment_length}-second chunks below
 (~{int(effective_duration)}s total). Do NOT re-split or rewrite any spoken lines.
 Generate a style_lock plus a Seeddance prompt, camera note, and transition_out for EACH chunk.
+{beat_instructions}
 
 == BRAND CONTEXT ==
 Brand: {brand_name}
@@ -1055,9 +1159,9 @@ Product: {product_description}
       "start_time": "{script_chunks[0].get('start_time', '0:00')}",
       "end_time": "{script_chunks[0].get('end_time', f'0:{segment_length:02d}')}",
       "transcript": "exact script chunk provided above — verbatim",
-      "seeddance_prompt": "Self-contained Seeddance prompt. MUST start with the full character description from style_lock. Describe action, setting, camera angle, movement, and mood. End with style keywords.",
-      "camera": "e.g. medium close-up, slow push-in",
-      "transition_out": "how the last frame should look so the next segment connects"
+      "seeddance_prompt": "{seeddance_example}",
+      "camera": "{camera_example}",
+      "transition_out": "Exact last-frame composition for handoff to the next segment — pose, prop placement, background"
     }}
   ]
 }}
@@ -1066,9 +1170,9 @@ CRITICAL RULES:
 - Return exactly {len(script_chunks)} segments, in order, matching the script chunks above.
 - Each transcript field MUST match the provided script chunk verbatim — do not edit copy.
 - Copy the character description from style_lock into every seeddance_prompt.
-- Camera angles should flow between segments; lighting/color tags identical in every prompt.
-- Keep each seeddance_prompt concise (roughly 80–120 words).
-
+{beat_critical_rule}
+{density_rule}- Camera angles may change within a segment; lighting/color tags stay consistent with style_lock.
+{length_rule}
 Return ONLY the raw JSON object."""
 
         content_blocks: list = [{"type": "text", "text": prompt_text}]

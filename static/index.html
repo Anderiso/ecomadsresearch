@@ -237,6 +237,16 @@ tailwind.config = {
           <span>0 (single shot)</span>
           <span>10 (dense)</span>
         </div>
+
+        <label class="flex items-start gap-3 mt-4 cursor-pointer">
+          <input id="hyper_animation_enabled" type="checkbox"
+            class="accent-accent w-4 h-4 mt-0.5 cursor-pointer shrink-0"
+            onchange="saveBeatRangeSettings()" />
+          <span>
+            <span class="text-sm font-medium text-gray-200 block">Hyper / bizarre animation</span>
+            <span class="text-xs text-gray-500 leading-relaxed">Wild, action-packed, surreal cutscenes — less logical, more scroll-stopping. Off = current default style.</span>
+          </span>
+        </label>
       </div>
 
       <button id="btn-segment" onclick="runSegment()"
@@ -340,6 +350,12 @@ document.getElementById('segment_length').addEventListener('input', () => {
 
 const BEAT_RANGE_KEY = 'adremix_beat_range';
 
+const SCRIPT_COPY_INSTRUCTIONS =
+  'Voiceover / script instructions:\n' +
+  '- Spoken language: English only. All dialogue and on-screen text must be in English.\n' +
+  '- Do not translate, paraphrase, or generate the script in any other language.\n' +
+  '- Follow the script below word for word:\n';
+
 function loadBeatRangeSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem(BEAT_RANGE_KEY) || '{}');
@@ -348,6 +364,9 @@ function loadBeatRangeSettings() {
     }
     if (saved.min != null) document.getElementById('beat_min').value = saved.min;
     if (saved.max != null) document.getElementById('beat_max').value = saved.max;
+    if (saved.hyper != null) {
+      document.getElementById('hyper_animation_enabled').checked = saved.hyper;
+    }
   } catch {}
   updateBeatRangeUI();
 }
@@ -365,6 +384,7 @@ function getBeatRangeSettings() {
     enabled: document.getElementById('beat_requirement_enabled').checked,
     min,
     max,
+    hyper: document.getElementById('hyper_animation_enabled').checked,
   };
 }
 
@@ -848,6 +868,7 @@ async function runSegment() {
       beat_requirement_enabled: beatSettings.enabled,
       beat_min: beatSettings.min,
       beat_max: beatSettings.max,
+      hyper_animation_enabled: beatSettings.hyper,
     });
 
     renderSegments(segmentData);
@@ -972,7 +993,7 @@ function buildSegmentCopyTextFromParts(prompt, camera, transition, script) {
 
   let text = parts.join('\n\n');
   if (s) {
-    text += `\n\nScript for the video should follow this word for word:\n${s}`;
+    text += `\n\n${SCRIPT_COPY_INSTRUCTIONS}${s}`;
   }
   return text;
 }

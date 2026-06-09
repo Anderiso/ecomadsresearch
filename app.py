@@ -963,11 +963,27 @@ async def rewrite(request: Request):
 #    Seeddance prompts and a style-lock for visual consistency
 # ---------------------------------------------------------------------------
 
+def _build_hyper_animation_block(enabled: bool) -> str:
+    if not enabled:
+        return ""
+    return """
+== ANIMATION STYLE (user enabled: HYPER / BIZARRE) ==
+The user wants scroll-stopping ANIMATED ad visuals — not polite, logical, or realistic.
+Every beat should feel like a manic short-form ad cut: exaggerated motion, surreal physics,
+impossible camera moves, smash cuts, morphs, zoom punches, object transformations, visual gags.
+Less "character stands and talks" — more chaotic, bizarre, action-packed spectacle that hooks
+attention continuously. Still map each beat to the script's meaning, but express it through WILD
+visuals (swarming cartoon parasites vacuumed into a softgel, gut inflating like a balloon then
+popping, skeleton surfing a wave of liquid). Push motion and surprise — go weird when the script
+allows it. Default to energy and spectacle over calm explanation."""
+
 def _build_segment_beat_instructions(
     enabled: bool,
     beat_min: int,
     beat_max: int,
     segment_length: int,
+    *,
+    hyper_animation: bool = False,
 ) -> tuple[str, str]:
     """Return (main_instruction_block, critical_rules_suffix) for segment prompt."""
     if not enabled:
@@ -1015,30 +1031,66 @@ For every segment:
 5. End on transition_out so the next segment can connect cleanly.
 
 BAD (too static): "Character stands in studio, gives thumbs up, points to link."
-GOOD (multi-beat): "Beat 1: close-up miming disgust at bloating. Cut to Beat 2: medium shot
-gesturing at gut. Cut to Beat 3: product softgel hero insert. Cut to Beat 4: relieved smile.
-Cut to Beat 5: direct camera point-down to CTA area, hold for end frame." """
+GOOD (multi-beat): "{_beat_good_example(hyper_animation)}" """
 
     return beat_body, beat_rule
 
-def _build_segment_seeddance_example(enabled: bool, beat_min: int, beat_max: int, segment_length: int) -> str:
-    if not enabled:
+def _beat_good_example(hyper_animation: bool) -> str:
+    if hyper_animation:
         return (
+            "Beat 1: extreme close-up — cartoon parasites swarm out of character's belly button, "
+            "skeleton recoils in horror. Smash cut to Beat 2: gut inflates like a balloon, "
+            "character slaps it and parasites fly off in all directions. Cut to Beat 3: softgel "
+            "drops from sky in slow-mo, explodes into golden shockwave that vaporizes parasites. "
+            "Cut to Beat 4: character spins triumphantly, ribs glow neon green. Cut to Beat 5: "
+            "zoom-punch to CTA arrow, character points with both hands, freeze frame."
+        )
+    return (
+        "Beat 1: close-up miming disgust at bloating. Cut to Beat 2: medium shot gesturing at gut. "
+        "Cut to Beat 3: product softgel hero insert. Cut to Beat 4: relieved smile. "
+        "Cut to Beat 5: direct camera point-down to CTA area, hold for end frame."
+    )
+
+def _build_segment_seeddance_example(
+    enabled: bool,
+    beat_min: int,
+    beat_max: int,
+    segment_length: int,
+    *,
+    hyper_animation: bool = False,
+) -> str:
+    if not enabled:
+        base = (
             "Self-contained Seeddance prompt. MUST start with the full character description "
             "from style_lock. Describe action, setting, camera angle, movement, and mood. "
             "End with style keywords."
         )
+        return base + (
+            " Each beat/scene: bizarre, surreal, action-packed, scroll-stopping animation."
+            if hyper_animation
+            else ""
+        )
     beat_max = max(0, min(10, beat_max))
     if beat_max <= 1:
-        return (
+        base = (
             f"Start with the full character description from style_lock. One cohesive scene for "
             f"the full {segment_length}s — action, setting, framing, mood. End with style keywords."
         )
-    return (
+        return base + (
+            " Exaggerated, surreal, high-energy motion — not a static talking shot."
+            if hyper_animation
+            else ""
+        )
+    base = (
         f"Start with the full character description from style_lock. Then a BEAT-BY-BEAT shot list "
         f"for the full {segment_length}s: label each beat (Beat 1, Beat 2, …), describe "
         "action/setting/framing/mood, and insert Cut to / Smash cut / Push-in / Insert between "
         "beats. Each beat should map to a phrase in the script. End with style keywords."
+    )
+    return base + (
+        " Each beat: bizarre, surreal, action-packed — less logical, more visually extreme."
+        if hyper_animation
+        else ""
     )
 
 @app.post("/api/segment")
@@ -1056,6 +1108,7 @@ async def segment(request: Request):
     beat_requirement_enabled = bool(data.get("beat_requirement_enabled", True))
     beat_min = int(data.get("beat_min", 2))
     beat_max = int(data.get("beat_max", 5))
+    hyper_animation_enabled = bool(data.get("hyper_animation_enabled", False))
 
     if not script_chunks:
         raise HTTPException(400, "script_chunks is required")
@@ -1106,10 +1159,25 @@ SPOKEN SCRIPT (fixed — copy verbatim into this segment's transcript field):
         pace_note = f"\nDelivery pace target: ~{target_wpm} WPM (scripts are already time-boxed).\n"
 
     beat_instructions, beat_critical_rule = _build_segment_beat_instructions(
-        beat_requirement_enabled, beat_min, beat_max, segment_length
+        beat_requirement_enabled,
+        beat_min,
+        beat_max,
+        segment_length,
+        hyper_animation=hyper_animation_enabled,
     )
     seeddance_example = _build_segment_seeddance_example(
-        beat_requirement_enabled, beat_min, beat_max, segment_length
+        beat_requirement_enabled,
+        beat_min,
+        beat_max,
+        segment_length,
+        hyper_animation=hyper_animation_enabled,
+    )
+    hyper_animation_block = _build_hyper_animation_block(hyper_animation_enabled)
+    hyper_critical_rule = (
+        "- HYPER mode on: every beat must be bizarre, action-packed, and visually extreme — "
+        "avoid bland talking-head or single-pose shots.\n"
+        if hyper_animation_enabled
+        else ""
     )
     camera_example = (
         "Overall camera language for the segment AND any per-beat shifts (e.g. Beat 1 MCU → Beat 2 wide → Beat 3 product macro)"
@@ -1135,6 +1203,10 @@ TASK: The ad script is ALREADY split into fixed {segment_length}-second chunks b
 (~{int(effective_duration)}s total). Do NOT re-split or rewrite any spoken lines.
 Generate a style_lock plus a Seeddance prompt, camera note, and transition_out for EACH chunk.
 {beat_instructions}
+{hyper_animation_block}
+
+All spoken scripts below are ENGLISH. Visuals and any on-screen text must be English — never
+translate dialogue into another language.
 
 == BRAND CONTEXT ==
 Brand: {brand_name}
@@ -1171,7 +1243,7 @@ CRITICAL RULES:
 - Each transcript field MUST match the provided script chunk verbatim — do not edit copy.
 - Copy the character description from style_lock into every seeddance_prompt.
 {beat_critical_rule}
-{density_rule}- Camera angles may change within a segment; lighting/color tags stay consistent with style_lock.
+{hyper_critical_rule}{density_rule}- Camera angles may change within a segment; lighting/color tags stay consistent with style_lock.
 {length_rule}
 Return ONLY the raw JSON object."""
 

@@ -352,9 +352,14 @@ const BEAT_RANGE_KEY = 'adremix_beat_range';
 
 const SCRIPT_COPY_INSTRUCTIONS =
   'Voiceover / script instructions:\n' +
-  '- Spoken language: English only. All dialogue and on-screen text must be in English.\n' +
+  '- Spoken language: English only. This is voiceover — not text to render on screen.\n' +
   '- Do not translate, paraphrase, or generate the script in any other language.\n' +
   '- Follow the script below word for word:\n';
+
+const VISUAL_NO_TEXT_RULES =
+  '\n\nVisual generation rules:\n' +
+  '- Do NOT generate any on-screen text, captions, titles, lower-thirds, watermarks, or readable typography.\n' +
+  '- Show characters, actions, props, products, and environments only — never render words in the frame.\n';
 
 function loadBeatRangeSettings() {
   try {
@@ -992,6 +997,9 @@ function buildSegmentCopyTextFromParts(prompt, camera, transition, script) {
   if (t) parts.push(`End frame: ${t}`);
 
   let text = parts.join('\n\n');
+  if (p || c || t) {
+    text += VISUAL_NO_TEXT_RULES;
+  }
   if (s) {
     text += `\n\n${SCRIPT_COPY_INSTRUCTIONS}${s}`;
   }

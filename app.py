@@ -977,6 +977,19 @@ visuals (swarming cartoon parasites vacuumed into a softgel, gut inflating like 
 popping, skeleton surfing a wave of liquid). Push motion and surprise — go weird when the script
 allows it. Default to energy and spectacle over calm explanation."""
 
+NO_ONSCREEN_TEXT_BLOCK = """
+== NO ON-SCREEN TEXT (mandatory) ==
+AI video models render text poorly. NEVER ask the generator to create readable words in the frame.
+
+In seeddance_prompt, camera, and transition_out — do NOT mention:
+- On-screen text, captions, titles, subtitles, lower-thirds, or typography
+- "Bold text", "put text here", "show the words", price tags with readable numbers, logos with legible lettering
+- Pointing at a "link", "URL", "CTA text", or "buy now" banner
+
+Instead describe ONLY what we SEE: characters, expressions, gestures, props, products, environments,
+camera moves, lighting, and physical action. If the script mentions "link below", show the character
+pointing downward or holding the product — never render the words on screen."""
+
 def _build_segment_beat_instructions(
     enabled: bool,
     beat_min: int,
@@ -1043,12 +1056,12 @@ def _beat_good_example(hyper_animation: bool) -> str:
             "character slaps it and parasites fly off in all directions. Cut to Beat 3: softgel "
             "drops from sky in slow-mo, explodes into golden shockwave that vaporizes parasites. "
             "Cut to Beat 4: character spins triumphantly, ribs glow neon green. Cut to Beat 5: "
-            "zoom-punch to CTA arrow, character points with both hands, freeze frame."
+            "zoom-punch in — character points emphatically at product bottle with both hands, freeze frame."
         )
     return (
         "Beat 1: close-up miming disgust at bloating. Cut to Beat 2: medium shot gesturing at gut. "
         "Cut to Beat 3: product softgel hero insert. Cut to Beat 4: relieved smile. "
-        "Cut to Beat 5: direct camera point-down to CTA area, hold for end frame."
+        "Cut to Beat 5: character points down toward product on table, direct eye contact, hold for end frame."
     )
 
 def _build_segment_seeddance_example(
@@ -1204,9 +1217,10 @@ TASK: The ad script is ALREADY split into fixed {segment_length}-second chunks b
 Generate a style_lock plus a Seeddance prompt, camera note, and transition_out for EACH chunk.
 {beat_instructions}
 {hyper_animation_block}
+{NO_ONSCREEN_TEXT_BLOCK}
 
-All spoken scripts below are ENGLISH. Visuals and any on-screen text must be English — never
-translate dialogue into another language.
+All spoken scripts below are ENGLISH voiceover only — never translate dialogue. The VO is added
+separately; the video itself must contain NO readable on-screen text.
 
 == BRAND CONTEXT ==
 Brand: {brand_name}
@@ -1242,6 +1256,8 @@ CRITICAL RULES:
 - Return exactly {len(script_chunks)} segments, in order, matching the script chunks above.
 - Each transcript field MUST match the provided script chunk verbatim — do not edit copy.
 - Copy the character description from style_lock into every seeddance_prompt.
+- NEVER instruct on-screen text, captions, or typography in seeddance_prompt, camera, or transition_out.
+- Describe scenes, characters, actions, props, and camera only — no readable words in the frame.
 {beat_critical_rule}
 {hyper_critical_rule}{density_rule}- Camera angles may change within a segment; lighting/color tags stay consistent with style_lock.
 {length_rule}

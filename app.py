@@ -235,6 +235,136 @@ def calc_segment_plan(duration_sec: float, segment_length: int) -> tuple[int, fl
     effective_duration = num_segments * segment_length
     return num_segments, float(effective_duration)
 
+def _duration_from_wpm(word_count: int, target_wpm: int) -> float:
+    if target_wpm <= 0:
+        return 60.0
+    return max(0.1, (word_count / target_wpm) * 60)
+
+def _validate_partition_word_match(
+    segments: list,
+    full_script: str,
+    num_expected: int,
+) -> list[str]:
+    issues: list[str] = []
+    if len(segments) != num_expected:
+        issues.append(f"expected {num_expected} segments but got {len(segments)}")
+        return issues
+    concat = " ".join((s.get("transcript") or "").strip() for s in segments)
+    if _word_list(concat) != _word_list(full_script):
+        issues.append("segment transcripts must use the exact same words as full_script in order")
+    return issues
+
+async def _execute_partition(
+    client: Anthropic,
+    full_script: str,
+    plan: dict,
+    *,
+    strict_balance: bool = True,
+    custom_mode: bool = False,
+) -> tuple[list[dict], str, int]:
+    """Partition full_script into timed chunks. Returns (segments_raw, source, attempts)."""
+    word_targets = plan.get("segment_word_targets") or _word_targets_for_script(
+        full_script, plan["num_segments"]
+    )
+    partition_attempts = 0
+    partition_source = "claude"
+    segments_raw: list[dict] = []
+    partition_issues: list[str] = []
+    word_match_issues: list[str] = []
+
+    for attempt in range(PARTITION_MAX_ATTEMPTS):
+        feedback = ""
+        if attempt > 0 and partition_issues and segments_raw:
+            feedback = _build_partition_retry_feedback(
+                partition_issues, segments_raw, word_targets
+            )
+
+        log.info("Partition (attempt %d, strict=%s)", attempt + 1, strict_balance)
+        partition_result = await asyncio.to_thread(
+            _call_claude_json,
+            client,
+            _partition_prompt(
+                full_script=full_script,
+                plan=plan,
+                word_targets=word_targets,
+                retry_feedback=feedback,
+                custom_mode=custom_mode,
+            ),
+            PARTITION_MAX_TOKENS,
+        )
+        partition_attempts = attempt + 1
+        segments_raw = partition_result.get("segments") or []
+        word_match_issues = _validate_partition_word_match(
+            segments_raw, full_script, plan["num_segments"]
+        )
+        if word_match_issues:
+            partition_issues = word_match_issues
+            _log_rewrite_validation_failure(
+                "partition",
+                attempt,
+                partition_issues,
+                partition_result,
+                plan,
+                full_script=full_script,
+            )
+            continue
+
+        if strict_balance:
+            partition_issues = _validate_partition(
+                segments_raw, full_script, plan, word_targets
+            )
+            if not partition_issues:
+                return segments_raw, partition_source, partition_attempts
+            _log_rewrite_validation_failure(
+                "partition",
+                attempt,
+                partition_issues,
+                partition_result,
+                plan,
+                full_script=full_script,
+            )
+        else:
+            return segments_raw, partition_source, partition_attempts
+
+    log.warning(
+        "Partition failed after %d Claude attempt(s) — using server-side split",
+        partition_attempts,
+    )
+    partition_source = "server"
+    segments_raw = _partition_full_script_server(full_script, word_targets)
+    word_match_issues = _validate_partition_word_match(
+        segments_raw, full_script, plan["num_segments"]
+    )
+    if word_match_issues:
+        log.warning("Server phrase split word mismatch — using exact word-count split")
+        partition_source = "server-exact"
+        segments_raw = _partition_full_script_exact(full_script, word_targets)
+
+    if strict_balance:
+        partition_issues = _validate_partition(
+            segments_raw, full_script, plan, word_targets
+        )
+        if partition_issues:
+            partition_source = "server-exact"
+            segments_raw = _partition_full_script_exact(full_script, word_targets)
+            partition_issues = _validate_partition(
+                segments_raw, full_script, plan, word_targets
+            )
+            if partition_issues:
+                merged = {"full_script": full_script, "segments": segments_raw}
+                raise HTTPException(
+                    500,
+                    detail={
+                        "message": "Could not partition script into balanced segments.",
+                        "phase": "partition",
+                        "issues": partition_issues,
+                        "attempts": partition_attempts,
+                        "debug": _format_rewrite_debug(merged, plan),
+                    },
+                )
+
+    return segments_raw, partition_source, partition_attempts
+
 def _segment_word_targets(total_words: int, num_segments: int) -> list[int]:
     """Even split of total_words across segments (e.g. 411 over 8 → three 52s, five 51s)."""
     base = max(1, total_words // num_segments)
@@ -654,6 +784,7 @@ def _partition_prompt(
     plan: dict,
     word_targets: list[int],
     retry_feedback: str = "",
+    custom_mode: bool = False,
 ) -> str:
     n = plan["num_segments"]
     seg_len = plan["segment_length"]
@@ -663,6 +794,13 @@ def _partition_prompt(
         for i, t in enumerate(word_targets)
     )
     retry_block = f"\n== FIX REQUEST ==\n{retry_feedback}\n" if retry_feedback else ""
+    custom_block = ""
+    if custom_mode:
+        custom_block = """
+== CUSTOM SCRIPT (verbatim — cut only) ==
+The user wrote this script themselves. Do NOT change, add, remove, or paraphrase ANY word.
+Your only job is to choose where to cut. A single changed word is a failure.
+"""
 
     return f"""You are a video editor splitting a voiceover script into {n} timed chunks for {seg_len}-second clips.
 
@@ -670,7 +808,7 @@ YOUR ONLY JOB IS TO CUT — NOT REWRITE:
 - Do NOT change, add, or remove ANY words
 - Every word from the script must appear once, in order
 - Concatenating all segment transcripts must reproduce the full script exactly
-
+{custom_block}
 BALANCE (critical):
 Split into exactly {n} consecutive chunks with these word-count targets:
 {target_breakdown}
@@ -860,73 +998,9 @@ async def rewrite(request: Request):
         )
 
         # Phase 2: partition into balanced timed chunks
-        partition_attempts = 0
-        partition_source = "claude"
-        segments_raw: list[dict] = []
-        partition_issues: list[str] = []
-
-        for attempt in range(PARTITION_MAX_ATTEMPTS):
-            feedback = ""
-            if attempt > 0 and partition_issues and segments_raw:
-                feedback = _build_partition_retry_feedback(
-                    partition_issues, segments_raw, word_targets
-                )
-
-            log.info("Rewrite phase 2 — partition (attempt %d)", attempt + 1)
-            partition_result = await asyncio.to_thread(
-                _call_claude_json,
-                client,
-                _partition_prompt(
-                    full_script=full_script,
-                    plan=plan,
-                    word_targets=word_targets,
-                    retry_feedback=feedback,
-                ),
-                PARTITION_MAX_TOKENS,
-            )
-            partition_attempts = attempt + 1
-            segments_raw = partition_result.get("segments") or []
-            partition_issues = _validate_partition(
-                segments_raw, full_script, plan, word_targets
-            )
-            if not partition_issues:
-                break
-
-            _log_rewrite_validation_failure(
-                "partition", attempt, partition_issues, partition_result, plan, full_script=full_script
-            )
-
-        if partition_issues:
-            log.warning(
-                "Partition failed after %d Claude attempt(s) — using server-side split",
-                partition_attempts,
-            )
-            partition_source = "server"
-            segments_raw = _partition_full_script_server(full_script, word_targets)
-            partition_issues = _validate_partition(
-                segments_raw, full_script, plan, word_targets
-            )
-            if partition_issues:
-                log.warning(
-                    "Phrase-aware server split still unbalanced — using exact word-count split"
-                )
-                partition_source = "server-exact"
-                segments_raw = _partition_full_script_exact(full_script, word_targets)
-                partition_issues = _validate_partition(
-                    segments_raw, full_script, plan, word_targets
-                )
-            if partition_issues:
-                merged = {"full_script": full_script, "segments": segments_raw}
-                raise HTTPException(
-                    500,
-                    detail={
-                        "message": "Could not partition script into balanced segments.",
-                        "phase": "partition",
-                        "issues": partition_issues,
-                        "attempts": partition_attempts,
-                        "debug": _format_rewrite_debug(merged, plan),
-                    },
-                )
+        segments_raw, partition_source, partition_attempts = await _execute_partition(
+            client, full_script, plan, strict_balance=True, custom_mode=False
+        )
 
         segments = _annotate_rewrite_segments(segments_raw, plan["segment_length"])
 
@@ -957,6 +1031,75 @@ async def rewrite(request: Request):
     except Exception as e:
         log.exception("Rewrite failed")
         raise HTTPException(500, detail={"message": f"Rewrite failed: {e}"})
+
+# ---------------------------------------------------------------------------
+# 2b. Partition – user-supplied script → timed chunks only (no rewrite)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/partition")
+async def partition_script_endpoint(request: Request):
+    data = await request.json()
+    full_script = (data.get("full_script") or "").strip()
+    segment_length = int(data.get("segment_length", 15))
+    target_wpm = int(data.get("target_wpm") or 210)
+
+    if not full_script:
+        raise HTTPException(400, "full_script is required")
+
+    word_count = _count_words(full_script)
+    duration = _duration_from_wpm(word_count, target_wpm)
+    plan = _build_pace_plan(duration, segment_length, target_wpm, word_count)
+    plan["source_duration"] = round(duration, 1)
+    plan["actual_word_count"] = word_count
+    plan["segment_word_targets"] = _segment_word_targets(word_count, plan["num_segments"])
+    plan["workflow"] = "custom"
+
+    client = _anthropic()
+
+    log.info(
+        "Custom partition: %d words @ %d WPM → %.1fs, %d × %ds segments",
+        word_count,
+        target_wpm,
+        duration,
+        plan["num_segments"],
+        segment_length,
+    )
+
+    try:
+        segments_raw, partition_source, partition_attempts = await _execute_partition(
+            client,
+            full_script,
+            plan,
+            strict_balance=False,
+            custom_mode=True,
+        )
+        segments = _annotate_rewrite_segments(segments_raw, plan["segment_length"])
+
+        log.info(
+            "Custom partition OK via %s (%d attempt(s)): %s",
+            partition_source,
+            partition_attempts,
+            [s["word_count"] for s in segments],
+        )
+
+        return JSONResponse({
+            "full_script": full_script,
+            "segments": segments,
+            "meta": plan,
+            "partition_attempts": partition_attempts,
+            "partition_source": partition_source,
+        })
+    except HTTPException:
+        raise
+    except json.JSONDecodeError as e:
+        log.exception("Claude returned invalid JSON for partition")
+        raise HTTPException(500, detail={
+            "message": "Claude returned invalid JSON for partition — please retry.",
+            "error": str(e),
+        })
+    except Exception as e:
+        log.exception("Partition failed")
+        raise HTTPException(500, detail={"message": f"Partition failed: {e}"})
 
 # ---------------------------------------------------------------------------
 # 3. Segment & Generate Prompts – rewritten script → 15-sec segments with

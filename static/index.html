@@ -59,6 +59,9 @@ tailwind.config = {
     border: 2px solid #fff; cursor: pointer; pointer-events: auto;
   }
   .dual-range.is-disabled { opacity: 0.4; pointer-events: none; }
+  .nav-tab { padding: 0.5rem 1.25rem; font-size: 0.875rem; font-weight: 500; border-radius: 0.5rem; color: #9ca3af; transition: background .15s, color .15s; }
+  .nav-tab:hover { color: #e5e7eb; }
+  .nav-tab.active { background: #6d5cff; color: #fff; }
 </style>
 </head>
 
@@ -99,21 +102,25 @@ tailwind.config = {
     </button>
     <p id="brand-saved" class="text-xs text-green-400 text-center hidden">Saved ✓</p>
 
-    <div id="speech-pace-section" class="hidden pt-4 mt-2 border-t border-white/5 space-y-3">
+    <div id="speech-pace-section" class="pt-4 mt-2 border-t border-white/5 space-y-3">
       <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-500">This Ad</h3>
       <label class="block">
         <div class="flex items-center justify-between mb-1">
           <span class="text-xs text-gray-400">Speech pace</span>
-          <span id="speech-wpm-value" class="text-xs text-accent font-semibold tabular-nums">— WPM</span>
+          <span id="speech-wpm-value" class="text-xs text-accent font-semibold tabular-nums">210 WPM</span>
         </div>
-        <p id="speech-wpm-baseline" class="text-[11px] text-gray-600 mb-2 leading-relaxed"></p>
-        <input id="speech_wpm" type="range" min="100" max="200" value="150" step="1"
-          class="w-full accent-accent cursor-pointer" oninput="updateSpeechPaceUI()" />
+        <p id="speech-wpm-baseline" class="text-[11px] text-gray-600 mb-2 leading-relaxed">Set your desired speaking pace for segment timing.</p>
+        <input id="speech_wpm" type="range" min="90" max="250" value="210" step="1"
+          class="w-full accent-accent cursor-pointer" oninput="onSpeechWpmChange()" />
         <div class="flex justify-between text-[10px] text-gray-600 mt-1">
           <span>Slower</span>
           <span>Faster</span>
         </div>
         <p id="speech-wpm-hint" class="text-[11px] text-gray-600 mt-2 leading-relaxed"></p>
+      </label>
+      <label class="block">
+        <span class="text-xs text-gray-400 mb-1 block">Tone / Voice</span>
+        <input id="ad_tone" class="w-full bg-surface-3 border border-white/10 rounded-lg px-3 py-2 text-sm" placeholder="e.g. casual, confident, relatable" />
       </label>
     </div>
   </div>
@@ -127,10 +134,16 @@ tailwind.config = {
 <main class="flex-1 overflow-y-auto">
   <div class="max-w-3xl mx-auto px-6 py-8 space-y-6">
 
-    <h1 class="text-2xl font-bold tracking-tight">Ad Remix Pipeline</h1>
-    <p class="text-sm text-gray-500 -mt-3">Upload an ad → transcribe → rewrite → generate segment prompts → export</p>
+    <h1 class="text-2xl font-bold tracking-tight">AdRemix</h1>
+    <p id="pipeline-subtitle" class="text-sm text-gray-500 -mt-3 mb-4">Upload an ad → transcribe → rewrite → generate segment prompts → export</p>
 
-    <!-- ── STEP 1: UPLOAD ── -->
+    <nav class="flex gap-1 p-1 bg-surface-2 rounded-lg border border-white/5 w-fit mb-6">
+      <button type="button" id="nav-remake" onclick="switchTab('remake')" class="nav-tab active">Remake</button>
+      <button type="button" id="nav-custom" onclick="switchTab('custom')" class="nav-tab">Custom</button>
+    </nav>
+
+    <!-- ── REMAKE TAB ── -->
+    <div id="panel-remake" class="space-y-6">
     <section class="step-card bg-surface-2 rounded-xl border border-white/5 p-5">
       <h2 class="font-semibold flex items-center gap-2 mb-4">
         <span class="bg-accent/20 text-accent text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">1</span>
@@ -161,7 +174,7 @@ tailwind.config = {
         <span class="bg-accent/20 text-accent text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">2</span>
         Original Transcript
       </h2>
-      <p class="text-xs text-gray-500 mb-3">Edit if Whisper got anything wrong, set the tone for this ad, then rewrite for your brand.</p>
+      <p class="text-xs text-gray-500 mb-3">Edit if Whisper got anything wrong, then rewrite for your brand. Set tone and speech pace in the sidebar.</p>
 
       <div class="flex items-center gap-2 mb-2 text-xs text-gray-500">
         <span id="duration-badge" class="bg-surface-3 px-2 py-0.5 rounded"></span>
@@ -170,36 +183,59 @@ tailwind.config = {
 
       <textarea id="transcript-text" rows="6" class="w-full bg-surface-3 border border-white/10 rounded-lg px-4 py-3 text-sm leading-relaxed"></textarea>
 
-      <label class="block mt-4">
-        <span class="text-xs text-gray-400 mb-1 block">Tone / Voice <span class="text-gray-600">(for this ad)</span></span>
-        <input id="ad_tone" class="w-full bg-surface-3 border border-white/10 rounded-lg px-3 py-2 text-sm" placeholder="e.g. casual, confident, relatable — not saved to brand profile" />
-      </label>
-
       <button id="btn-rewrite" onclick="runRewrite()"
         class="mt-3 w-full bg-accent hover:bg-accent-light text-white text-sm font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-2">
         <span id="rewrite-spinner" class="hidden"><svg class="w-4 h-4 spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83"/></svg></span>
         Rewrite for My Brand
       </button>
     </section>
+    </div>
 
-    <!-- ── STEP 3: REWRITE ── -->
-    <section id="step-rewrite" class="step-card bg-surface-2 rounded-xl border border-white/5 p-5 hidden">
+    <!-- ── CUSTOM TAB ── -->
+    <div id="panel-custom" class="space-y-6 hidden">
+    <section id="step-custom-script" class="step-card bg-surface-2 rounded-xl border border-white/5 p-5">
       <h2 class="font-semibold flex items-center gap-2 mb-1">
-        <span class="bg-accent/20 text-accent text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">3</span>
-        Rewritten Script
+        <span class="bg-accent/20 text-accent text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">1</span>
+        Your Script
       </h2>
-      <p class="text-xs text-gray-500 mb-3">Edit each timed chunk, optionally add visual reference, then generate Seeddance prompts.</p>
+      <p class="text-xs text-gray-500 mb-3">Paste your finished script. Set speech pace in the sidebar, then partition into timed chunks.</p>
+
+      <div class="flex items-center gap-2 mb-2 text-xs text-gray-500">
+        <span id="custom-word-count-badge" class="bg-surface-3 px-2 py-0.5 rounded">0 words</span>
+        <span id="custom-duration-badge" class="bg-surface-3 px-2 py-0.5 rounded hidden"></span>
+      </div>
+
+      <textarea id="custom-script-text" rows="10" class="w-full bg-surface-3 border border-white/10 rounded-lg px-4 py-3 text-sm leading-relaxed" placeholder="Paste your full ad script here…" oninput="onCustomScriptInput()"></textarea>
+
+      <div class="flex gap-2 mt-3">
+        <button type="button" onclick="resetCustomWorkflow()" class="text-xs text-gray-500 hover:text-gray-300 px-3 py-2 rounded-lg border border-white/10 transition">New script</button>
+        <button id="btn-partition" onclick="runPartition()" class="flex-1 bg-accent hover:bg-accent-light text-white text-sm font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-2">
+          <span id="partition-spinner" class="hidden"><svg class="w-4 h-4 spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83"/></svg></span>
+          Partition into Segments
+        </button>
+      </div>
+    </section>
+    </div>
+
+    <!-- ── SHARED: chunks + visual + prompts (both workflows) ── -->
+    <div id="shared-chunk-pipeline" class="space-y-6 hidden">
+    <section class="step-card bg-surface-2 rounded-xl border border-white/5 p-5">
+      <h2 class="font-semibold flex items-center gap-2 mb-1">
+        <span class="bg-accent/20 text-accent text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center" id="shared-step-num">3</span>
+        <span id="shared-chunks-title">Script Segments</span>
+      </h2>
+      <p class="text-xs text-gray-500 mb-3">Edit each timed chunk, add visual reference, then generate Seeddance prompts.</p>
 
       <p id="rewrite-plan-summary" class="text-xs text-gray-500 mb-3 hidden"></p>
       <div id="rewrite-chunks-container" class="space-y-4"></div>
 
       <div class="mt-5 pt-5 border-t border-white/5">
         <h3 class="text-sm font-medium mb-1">Visual Reference <span class="text-gray-600 font-normal">(optional)</span></h3>
-        <p class="text-xs text-gray-500 mb-3">Describe how the original ad looked and/or add screenshots (upload, drag-drop, or paste into the box below).</p>
+        <p class="text-xs text-gray-500 mb-3">Describe the look you want and/or add screenshots (upload, drag-drop, or paste into the box below).</p>
 
         <label class="block">
-          <span class="text-xs text-gray-400 mb-1 block">What does the original ad look like?</span>
-          <textarea id="visual-description" rows="3" class="w-full bg-surface-3 border border-white/10 rounded-lg px-4 py-3 text-sm leading-relaxed" placeholder="Describe the look… or paste a screenshot here (Ctrl+V) and it’ll attach as a reference image"></textarea>
+          <span class="text-xs text-gray-400 mb-1 block">What should this ad look like?</span>
+          <textarea id="visual-description" rows="3" class="w-full bg-surface-3 border border-white/10 rounded-lg px-4 py-3 text-sm leading-relaxed" placeholder="Describe the look… or paste a screenshot here (Ctrl+V)"></textarea>
         </label>
 
         <div id="ref-images-drop" class="drop-zone mt-3 border-2 border-dashed border-white/10 rounded-xl p-6 text-center cursor-pointer hover:border-accent/50 transition">
@@ -256,23 +292,21 @@ tailwind.config = {
       </button>
       <p id="script-pace-warning" class="text-xs text-amber-500/90 mt-2 hidden"></p>
     </section>
+    </div>
 
-    <!-- ── STEP 4: SEGMENTS ── -->
+    <!-- ── STEP 4: SEGMENTS (shared) ── -->
     <section id="step-segments" class="step-card bg-surface-2 rounded-xl border border-white/5 p-5 hidden">
       <h2 class="font-semibold flex items-center gap-2 mb-1">
         <span class="bg-accent/20 text-accent text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">4</span>
         Video Segments &amp; Prompts
       </h2>
-      <p class="text-xs text-gray-500 mb-4">One card = one Seeddance generation (~15s). Each prompt should choreograph <strong class="text-gray-400 font-medium">multiple beats/scenes inside that clip</strong> — edit anything, then <strong class="text-gray-400 font-medium">Copy for Seeddance</strong> for the full prompt, camera notes, end-frame handoff, and spoken script.</p>
+      <p class="text-xs text-gray-500 mb-4">One card = one Seeddance generation (~15s). Each prompt should choreograph <strong class="text-gray-400 font-medium">multiple beats/scenes inside that clip</strong> — edit anything, then <strong class="text-gray-400 font-medium">Copy for Seeddance</strong> for style lock, segment prompt, camera, end-frame handoff, and spoken script in one paste.</p>
 
       <!-- Style Lock -->
       <div id="style-lock" class="bg-surface-3 border border-accent/20 rounded-lg p-4 mb-4 hidden">
-        <div class="flex items-start justify-between gap-3 mb-3">
-          <div>
-            <h3 class="text-xs font-semibold uppercase tracking-wider text-accent mb-1">Style Lock</h3>
-            <p class="text-xs text-gray-500">Visual constants for every segment — character, wardrobe, lighting, etc. Edit if needed, then copy once and reference while generating.</p>
-          </div>
-          <button type="button" onclick="copyStyleLock()" class="copy-btn relative shrink-0 text-xs font-medium text-accent hover:text-accent-light transition px-2 py-1">Copy style lock</button>
+        <div class="mb-3">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-accent mb-1">Style Lock</h3>
+          <p class="text-xs text-gray-500">Visual constants for every segment — included automatically when you copy any segment prompt.</p>
         </div>
         <div id="style-lock-content" class="space-y-3"></div>
       </div>
@@ -305,16 +339,201 @@ tailwind.config = {
 <!-- ===================================================================== -->
 <script>
 // ── State ──
+let activeTab = 'remake';
 let uploadedFile = null;
-let whisperData = null;   // { text, segments, words, duration }
-let segmentData = null;    // { style_lock, segments }
-let referenceImages = [];  // { id, preview, base64, media_type, name }
-let originalAdWpm = null;  // WPM measured from uploaded ad (per ad, not saved)
-let rewriteMeta = null;     // { meta, segments } from /api/rewrite
+let whisperData = null;
+const segmentDataByTab = { remake: null, custom: null };
+let referenceImages = [];
+let originalAdWpm = null;
+let rewriteMeta = null;
+let customMeta = null;
 const MAX_REF_IMAGES = 5;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const WHISPER_LIMIT_BYTES = 25 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+const WORKFLOW_STATE_KEY = 'adremix_workflow_state';
+const DEFAULT_CUSTOM_WPM = 210;
+const MAX_SPEECH_WPM = 250;
+
+function getActiveChunkMeta() {
+  return activeTab === 'custom' ? customMeta : rewriteMeta;
+}
+
+function getActiveSegmentData() {
+  return segmentDataByTab[activeTab];
+}
+
+function setActiveSegmentData(data) {
+  segmentDataByTab[activeTab] = data;
+}
+
+function setActiveChunkMeta(meta, tab) {
+  if (tab === 'custom') {
+    customMeta = meta;
+    segmentDataByTab.custom = null;
+  } else {
+    rewriteMeta = meta;
+    segmentDataByTab.remake = null;
+  }
+  showSharedChunkPipeline();
+  saveWorkflowState();
+}
+
+function showSharedChunkPipeline() {
+  refreshSharedChunkView();
+}
+
+function refreshSharedChunkView() {
+  const meta = getActiveChunkMeta();
+  const pipeline = document.getElementById('shared-chunk-pipeline');
+  const hasRemakeChunks = !!rewriteMeta?.segments?.length;
+  const hasCustomChunks = !!customMeta?.segments?.length;
+
+  if (meta?.segments?.length) {
+    pipeline.classList.remove('hidden');
+    document.getElementById('shared-step-num').textContent = activeTab === 'custom' ? '2' : '3';
+    document.getElementById('shared-chunks-title').textContent =
+      activeTab === 'custom' ? 'Script Segments' : 'Rewritten Script Segments';
+    renderRewriteChunks(meta.segments, meta.meta, activeTab === 'custom');
+    updateScriptPaceWarning();
+  } else {
+    document.getElementById('rewrite-chunks-container').innerHTML = '';
+    document.getElementById('rewrite-plan-summary')?.classList.add('hidden');
+    pipeline.classList.toggle('hidden', !hasRemakeChunks && !hasCustomChunks);
+  }
+
+  const segData = getActiveSegmentData();
+  const segmentsStep = document.getElementById('step-segments');
+  if (segData) {
+    renderSegments(segData);
+    segmentsStep.classList.remove('hidden');
+  } else {
+    segmentsStep.classList.add('hidden');
+  }
+
+  updateSpeechPaceUI();
+}
+
+function switchTab(tab) {
+  activeTab = tab;
+  localStorage.setItem('adremix_active_tab', tab);
+  document.getElementById('panel-remake').classList.toggle('hidden', tab !== 'remake');
+  document.getElementById('panel-custom').classList.toggle('hidden', tab !== 'custom');
+  document.getElementById('nav-remake').classList.toggle('active', tab === 'remake');
+  document.getElementById('nav-custom').classList.toggle('active', tab === 'custom');
+  document.getElementById('pipeline-subtitle').textContent = tab === 'remake'
+    ? 'Upload an ad → transcribe → rewrite → generate segment prompts → export'
+    : 'Paste your script → partition → describe visuals → generate segment prompts → export';
+  refreshSharedChunkView();
+  saveWorkflowState();
+}
+
+function saveWorkflowState() {
+  const state = {
+    activeTab,
+    remake: {
+      transcript: document.getElementById('transcript-text')?.value || '',
+      fileName: uploadedFile?.name || '',
+      rewriteMeta,
+      whisperDuration: whisperData?.duration || null,
+      segmentData: segmentDataByTab.remake,
+    },
+    custom: {
+      script: document.getElementById('custom-script-text')?.value || '',
+      customMeta,
+      segmentData: segmentDataByTab.custom,
+    },
+    ad_tone: document.getElementById('ad_tone')?.value || '',
+    speech_wpm: getTargetWpm(),
+    visual_description: document.getElementById('visual-description')?.value || '',
+  };
+  try {
+    localStorage.setItem(WORKFLOW_STATE_KEY, JSON.stringify(state));
+  } catch {}
+}
+
+function loadWorkflowState() {
+  try {
+    const state = JSON.parse(localStorage.getItem(WORKFLOW_STATE_KEY) || '{}');
+    if (state.remake?.transcript) {
+      document.getElementById('transcript-text').value = state.remake.transcript;
+    }
+    if (state.custom?.script) {
+      document.getElementById('custom-script-text').value = state.custom.script;
+    }
+    if (state.ad_tone) document.getElementById('ad_tone').value = state.ad_tone;
+    if (state.speech_wpm) document.getElementById('speech_wpm').value = state.speech_wpm;
+    if (state.visual_description) {
+      document.getElementById('visual-description').value = state.visual_description;
+    }
+    if (state.remake?.rewriteMeta) rewriteMeta = state.remake.rewriteMeta;
+    if (state.remake?.segmentData) segmentDataByTab.remake = state.remake.segmentData;
+    if (state.custom?.customMeta) customMeta = state.custom.customMeta;
+    if (state.custom?.segmentData) segmentDataByTab.custom = state.custom.segmentData;
+    if (state.remake?.transcript && state.remake.whisperDuration) {
+      whisperData = { text: state.remake.transcript, duration: state.remake.whisperDuration };
+      document.getElementById('duration-badge').textContent = `${state.remake.whisperDuration}s`;
+      document.getElementById('word-count-badge').textContent =
+        `${countWords(state.remake.transcript)} words`;
+      document.getElementById('step-transcript').classList.remove('hidden');
+    }
+    if (state.remake?.fileName) {
+      document.getElementById('file-name').textContent = state.remake.fileName;
+      document.getElementById('file-name').classList.remove('hidden');
+    }
+    const tab = state.activeTab === 'custom' ? 'custom' : 'remake';
+    switchTab(tab);
+    onCustomScriptInput();
+  } catch {}
+}
+
+function onSpeechWpmChange() {
+  updateSpeechPaceUI();
+  updateScriptPaceWarning();
+  saveWorkflowState();
+}
+
+function onCustomScriptInput() {
+  const words = countWords(document.getElementById('custom-script-text')?.value || '');
+  document.getElementById('custom-word-count-badge').textContent = `${words} words`;
+  updateSpeechPaceUI();
+  saveWorkflowState();
+}
+
+function getActiveScriptWordCount() {
+  if (activeTab === 'custom') {
+    return countWords(document.getElementById('custom-script-text')?.value || '');
+  }
+  if (whisperData?.text) return countWords(whisperData.text);
+  return countWords(document.getElementById('transcript-text')?.value || '');
+}
+
+function resetCustomWorkflow() {
+  document.getElementById('custom-script-text').value = '';
+  customMeta = null;
+  segmentDataByTab.custom = null;
+  onCustomScriptInput();
+  refreshSharedChunkView();
+  saveWorkflowState();
+}
+
+function clearRemakePipeline() {
+  originalAdWpm = null;
+  rewriteMeta = null;
+  whisperData = null;
+  segmentDataByTab.remake = null;
+  document.getElementById('transcript-text').value = '';
+  document.getElementById('rewrite-chunks-container').innerHTML = '';
+  document.getElementById('rewrite-plan-summary')?.classList.add('hidden');
+  document.getElementById('script-pace-warning')?.classList.add('hidden');
+  document.getElementById('step-transcript').classList.add('hidden');
+  const slider = document.getElementById('speech_wpm');
+  slider.min = 90;
+  slider.max = MAX_SPEECH_WPM;
+  slider.value = DEFAULT_CUSTOM_WPM;
+  refreshSharedChunkView();
+  saveWorkflowState();
+}
 
 // ── Brand persistence (tone is per-ad, not saved here) ──
 function loadBrand() {
@@ -342,11 +561,15 @@ function getBrand() {
   };
 }
 loadBrand();
+loadWorkflowState();
+updateSpeechPaceUI();
 
 document.getElementById('segment_length').addEventListener('input', () => {
-  updateSpeechPaceUI();
-  updateScriptPaceWarning();
+  onSpeechWpmChange();
 });
+document.getElementById('ad_tone')?.addEventListener('input', saveWorkflowState);
+document.getElementById('visual-description')?.addEventListener('input', saveWorkflowState);
+document.getElementById('transcript-text')?.addEventListener('input', saveWorkflowState);
 
 const BEAT_RANGE_KEY = 'adremix_beat_range';
 
@@ -439,8 +662,9 @@ function chunkCountColor(wc, target) {
 }
 
 function getRewriteChunksFromDOM() {
-  if (!rewriteMeta?.segments) return [];
-  return rewriteMeta.segments.map((seg, i) => ({
+  const meta = getActiveChunkMeta();
+  if (!meta?.segments) return [];
+  return meta.segments.map((seg, i) => ({
     segment_number: seg.segment_number,
     start_time: seg.start_time,
     end_time: seg.end_time,
@@ -449,13 +673,14 @@ function getRewriteChunksFromDOM() {
 }
 
 function getChunkWordTarget(index) {
-  const targets = rewriteMeta?.meta?.segment_word_targets;
+  const targets = getActiveChunkMeta()?.meta?.segment_word_targets;
   if (targets?.[index] != null) return targets[index];
-  return rewriteMeta?.meta?.words_per_segment || 0;
+  return getActiveChunkMeta()?.meta?.words_per_segment || 0;
 }
 
 function updateRewriteChunkCount(index) {
-  if (!rewriteMeta?.meta) return;
+  const meta = getActiveChunkMeta();
+  if (!meta?.meta) return;
   const target = getChunkWordTarget(index);
   const wc = countWords(document.getElementById(`rewrite-chunk-${index}`)?.value || '');
   const countEl = document.getElementById(`rewrite-chunk-count-${index}`);
@@ -466,15 +691,16 @@ function updateRewriteChunkCount(index) {
   updateScriptPaceWarning();
 }
 
-function renderRewriteChunks(segments, meta) {
+function renderRewriteChunks(segments, meta, isCustom = false) {
   const container = document.getElementById('rewrite-chunks-container');
   const summary = document.getElementById('rewrite-plan-summary');
   const targets = meta.segment_word_targets || segments.map(() => meta.words_per_segment);
-  const totalTol = (meta.total_word_max ?? meta.total_word_target + 20) - meta.total_word_target;
-  summary.textContent =
-    `${meta.num_segments} segments × ${meta.segment_length}s (~${meta.effective_duration}s total) · ` +
-    `${meta.original_word_count} words original → rewrite ~${meta.total_word_target} (±${totalTol}) · ` +
-    `@ ${meta.target_wpm} WPM`;
+  summary.textContent = isCustom
+    ? `${meta.num_segments} segments × ${meta.segment_length}s (~${meta.effective_duration}s total) · ` +
+      `${meta.actual_word_count || meta.original_word_count} words @ ${meta.target_wpm} WPM`
+    : `${meta.num_segments} segments × ${meta.segment_length}s (~${meta.effective_duration}s total) · ` +
+      `${meta.original_word_count} words original → rewrite ~${meta.total_word_target} (±${(meta.total_word_max ?? meta.total_word_target + 20) - meta.total_word_target}) · ` +
+      `@ ${meta.target_wpm} WPM`;
 
   summary.classList.remove('hidden');
 
@@ -515,46 +741,70 @@ function setupSpeechPaceFromTranscript() {
 
   const slider = document.getElementById('speech_wpm');
   const min = Math.max(90, Math.round(originalAdWpm * 0.75));
-  const max = Math.min(220, Math.round(originalAdWpm * 1.25));
+  const max = Math.min(MAX_SPEECH_WPM, Math.round(originalAdWpm * 1.25));
   slider.min = min;
   slider.max = max;
   slider.value = originalAdWpm;
 
-  document.getElementById('speech-pace-section').classList.remove('hidden');
   updateSpeechPaceUI();
   updateScriptPaceWarning();
+  saveWorkflowState();
 }
 
 function updateSpeechPaceUI() {
-  if (!whisperData || originalAdWpm == null) return;
   const wpm = getTargetWpm();
   const segLen = parseInt(document.getElementById('segment_length').value, 10) || 15;
   const wordsPerSeg = Math.round((wpm / 60) * segLen);
-  const origWords = countWords(whisperData.text);
+  const scriptWords = getActiveScriptWordCount();
 
   document.getElementById('speech-wpm-value').textContent = `${wpm} WPM`;
-  document.getElementById('speech-wpm-baseline').textContent =
-    `Matched to your upload: ~${originalAdWpm} WPM (${origWords} words in ${whisperData.duration}s). Slide only if you want slower or faster.`;
-  document.getElementById('speech-wpm-hint').textContent =
-    `~${wordsPerSeg} words/${segLen}s at this WPM · script length stays near original (${origWords} ±20 words).`;
+
+  if (whisperData?.duration && originalAdWpm != null && activeTab === 'remake') {
+    const origWords = countWords(whisperData.text);
+    document.getElementById('speech-wpm-baseline').textContent =
+      `Matched to your upload: ~${originalAdWpm} WPM (${origWords} words in ${whisperData.duration}s). Slide to adjust.`;
+    document.getElementById('speech-wpm-hint').textContent =
+      `~${wordsPerSeg} words/${segLen}s at this WPM · script length stays near original (${origWords} ±20 words).`;
+  } else if (activeTab === 'custom' && scriptWords > 0) {
+    const dur = (scriptWords / wpm) * 60;
+    const segs = Math.ceil(dur / segLen);
+    document.getElementById('speech-wpm-baseline').textContent =
+      'Set your desired speaking pace for segment timing.';
+    document.getElementById('speech-wpm-hint').textContent =
+      `~${wordsPerSeg} words/${segLen}s · ${scriptWords} words ≈ ${Math.round(dur)}s → ~${segs} segments`;
+    const durBadge = document.getElementById('custom-duration-badge');
+    if (durBadge) {
+      durBadge.textContent = `~${Math.round(dur)}s · ~${segs} segments`;
+      durBadge.classList.remove('hidden');
+    }
+  } else {
+    document.getElementById('speech-wpm-baseline').textContent =
+      'Set your desired speaking pace for segment timing.';
+    document.getElementById('speech-wpm-hint').textContent =
+      activeTab === 'custom'
+        ? `~${wordsPerSeg} words per ${segLen}s segment at this WPM.`
+        : `~${wordsPerSeg} words/${segLen}s at this WPM.`;
+    document.getElementById('custom-duration-badge')?.classList.add('hidden');
+  }
 }
 
 function updateScriptPaceWarning() {
   const warn = document.getElementById('script-pace-warning');
-  if (!warn || !rewriteMeta?.meta) {
+  const meta = getActiveChunkMeta();
+  if (!warn || !meta?.meta || activeTab === 'custom') {
     warn?.classList.add('hidden');
     return;
   }
 
   const chunks = getRewriteChunksFromDOM();
-  const targets = rewriteMeta.meta.segment_word_targets || [];
+  const targets = meta.meta.segment_word_targets || [];
   const total = chunks.reduce((sum, c) => sum + countWords(c.transcript), 0);
-  const budget = rewriteMeta.meta.total_word_target;
-  const totalTol = (rewriteMeta.meta.total_word_max ?? budget + 20) - budget;
-  const minWords = rewriteMeta.meta.total_word_min ?? budget - totalTol;
-  const maxWords = rewriteMeta.meta.total_word_max ?? budget + totalTol;
+  const budget = meta.meta.total_word_target;
+  const totalTol = (meta.meta.total_word_max ?? budget + 20) - budget;
+  const minWords = meta.meta.total_word_min ?? budget - totalTol;
+  const maxWords = meta.meta.total_word_max ?? budget + totalTol;
   const offPace = chunks.filter((c, i) => {
-    const target = targets[i] ?? rewriteMeta.meta.words_per_segment;
+    const target = targets[i] ?? meta.meta.words_per_segment;
     return Math.abs(countWords(c.transcript) - target) > 5;
   }).length;
 
@@ -589,7 +839,7 @@ fileInput.addEventListener('change', () => { if (fileInput.files.length) handleF
 function handleFile(file) {
   if (file.size > MAX_UPLOAD_BYTES) return showToast('File must be under 500 MB.');
   uploadedFile = file;
-  resetAdInputs();
+  clearRemakePipeline();
   const el = document.getElementById('file-name');
   const mb = (file.size / 1024 / 1024).toFixed(1);
   el.textContent = `${file.name} (${mb} MB)`;
@@ -602,23 +852,7 @@ function handleFile(file) {
   }
   document.getElementById('transcribe-status').classList.add('hidden');
   document.getElementById('btn-transcribe').disabled = false;
-  document.getElementById('step-transcript').classList.add('hidden');
-  document.getElementById('step-rewrite').classList.add('hidden');
-  document.getElementById('step-segments').classList.add('hidden');
-  whisperData = null;
-  segmentData = null;
-}
-
-function resetAdInputs() {
-  document.getElementById('ad_tone').value = '';
-  document.getElementById('visual-description').value = '';
-  clearReferenceImages();
-  originalAdWpm = null;
-  rewriteMeta = null;
-  document.getElementById('rewrite-chunks-container').innerHTML = '';
-  document.getElementById('rewrite-plan-summary')?.classList.add('hidden');
-  document.getElementById('speech-pace-section').classList.add('hidden');
-  document.getElementById('script-pace-warning')?.classList.add('hidden');
+  saveWorkflowState();
 }
 
 // ── Reference image upload ──
@@ -801,6 +1035,7 @@ async function runTranscribe() {
     document.getElementById('step-transcript').classList.remove('hidden');
     document.getElementById('step-transcript').scrollIntoView({ behavior: 'smooth', block: 'start' });
     setupSpeechPaceFromTranscript();
+    saveWorkflowState();
   } catch (e) {
     showToast(e.message);
     statusEl.classList.add('hidden');
@@ -831,10 +1066,9 @@ async function runRewrite() {
       duration: whisperData.duration,
       target_wpm: getTargetWpm(),
     });
-    rewriteMeta = { meta: res.meta, segments: res.segments };
-    renderRewriteChunks(res.segments, res.meta);
-    document.getElementById('step-rewrite').classList.remove('hidden');
-    document.getElementById('step-rewrite').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setActiveChunkMeta({ meta: res.meta, segments: res.segments }, 'remake');
+    renderRewriteChunks(res.segments, res.meta, false);
+    document.getElementById('shared-chunk-pipeline').scrollIntoView({ behavior: 'smooth', block: 'start' });
     updateScriptPaceWarning();
   } catch (e) {
     showToast(e.message);
@@ -843,11 +1077,39 @@ async function runRewrite() {
   }
 }
 
-// ── Step 3: Segment ──
+// ── Custom: Partition ──
+async function runPartition() {
+  const brand = getBrand();
+  const full_script = document.getElementById('custom-script-text').value.trim();
+  if (!full_script) return showToast('Paste your script first.');
+  const tone = document.getElementById('ad_tone').value.trim();
+  if (!tone) return showToast('Describe the tone/voice in the sidebar first.');
+
+  setLoading('btn-partition', 'partition-spinner', true);
+  try {
+    const res = await apiPost('/api/partition', {
+      full_script,
+      segment_length: brand.segment_length,
+      target_wpm: getTargetWpm(),
+    });
+    setActiveChunkMeta({ meta: res.meta, segments: res.segments }, 'custom');
+    renderRewriteChunks(res.segments, res.meta, true);
+    document.getElementById('shared-chunk-pipeline').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    showToast(e.message);
+  } finally {
+    setLoading('btn-partition', 'partition-spinner', false);
+  }
+}
+
+// ── Step 3/4: Segment prompts ──
 async function runSegment() {
   const brand = getBrand();
   const script_chunks = getRewriteChunksFromDOM();
-  if (!script_chunks.length) return showToast('Rewrite the script first.');
+  const chunkMeta = getActiveChunkMeta();
+  if (!script_chunks.length) {
+    return showToast(activeTab === 'custom' ? 'Partition your script first.' : 'Rewrite the script first.');
+  }
   if (script_chunks.some(c => !c.transcript)) return showToast('Every script segment needs text before generating prompts.');
 
   const tone = document.getElementById('ad_tone').value.trim();
@@ -860,9 +1122,9 @@ async function runSegment() {
 
   setLoading('btn-segment', 'segment-spinner', true);
   try {
-    segmentData = await apiPost('/api/segment', {
+    const data = await apiPost('/api/segment', {
       script_chunks,
-      effective_duration: rewriteMeta?.meta?.effective_duration || whisperData?.duration || 60,
+      effective_duration: chunkMeta?.meta?.effective_duration || whisperData?.duration || 60,
       brand_name: brand.brand_name,
       product_description: brand.product_description,
       segment_length: brand.segment_length,
@@ -876,9 +1138,11 @@ async function runSegment() {
       hyper_animation_enabled: beatSettings.hyper,
     });
 
-    renderSegments(segmentData);
+    setActiveSegmentData(data);
+    renderSegments(data);
     document.getElementById('step-segments').classList.remove('hidden');
     document.getElementById('step-segments').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    saveWorkflowState();
   } catch (e) {
     showToast(e.message);
   } finally {
@@ -976,6 +1240,7 @@ function escHtml(s) {
 }
 
 function getStyleLockText() {
+  const segmentData = getActiveSegmentData();
   if (!segmentData?.style_lock) return '';
   return Object.keys(segmentData.style_lock)
     .map(k => {
@@ -986,13 +1251,34 @@ function getStyleLockText() {
     .join('\n');
 }
 
-function buildSegmentCopyTextFromParts(prompt, camera, transition, script) {
+function formatStyleLockBlock() {
+  const text = getStyleLockText();
+  if (!text) return '';
+  return `STYLE LOCK — keep consistent across every segment:\n\n${text}`;
+}
+
+function formatPreviousSegmentHandoffBlock(previousTransition) {
+  const t = (previousTransition || '').trim();
+  const frameDesc = t
+    ? `The previous segment ended on this exact frame:\n${t}`
+    : `Use the attached reference screenshot as the exact opening frame from the previous segment.`;
+  return (
+    `CONTINUE FROM PREVIOUS SEGMENT\n\n` +
+    `${frameDesc}\n\n` +
+    `A reference screenshot of that end frame is attached as an image input — match it precisely. ` +
+    `Open this segment by transitioning naturally from that composition (same pose, prop placement, ` +
+    `framing, and background continuity unless the script clearly calls for a hard cut).`
+  );
+}
+
+function buildSegmentPromptBodyFromParts(prompt, camera, transition, script) {
   const p = (prompt || '').trim();
   const c = (camera || '').trim();
   const t = (transition || '').trim();
   const s = (script || '').trim();
 
-  const parts = [p];
+  const parts = [];
+  if (p) parts.push(p);
   if (c) parts.push(`Camera: ${c}`);
   if (t) parts.push(`End frame: ${t}`);
 
@@ -1006,13 +1292,29 @@ function buildSegmentCopyTextFromParts(prompt, camera, transition, script) {
   return text;
 }
 
-function buildSegmentCopyText(index) {
-  return buildSegmentCopyTextFromParts(
+function buildSegmentCopyText(index, options = {}) {
+  const { includeStyleLock = true, includeHandoff = true } = options;
+  const blocks = [];
+
+  if (includeStyleLock) {
+    const lock = formatStyleLockBlock();
+    if (lock) blocks.push(lock);
+  }
+
+  if (includeHandoff && index > 0) {
+    const prevTransition = document.getElementById(`transition-${index - 1}`)?.value;
+    blocks.push(formatPreviousSegmentHandoffBlock(prevTransition));
+  }
+
+  const body = buildSegmentPromptBodyFromParts(
     document.getElementById(`prompt-${index}`)?.value,
     document.getElementById(`camera-${index}`)?.value,
     document.getElementById(`transition-${index}`)?.value,
     document.getElementById(`script-${index}`)?.value,
   );
+  if (body) blocks.push(body);
+
+  return blocks.join('\n\n');
 }
 
 function getBrandNameForMatch() {
@@ -1024,16 +1326,26 @@ function segmentHasProductPlacement(index, seg = null) {
   if (!brand) return false;
 
   const promptEl = document.getElementById(`prompt-${index}`);
-  const copyText = promptEl
-    ? buildSegmentCopyText(index)
-    : seg
-      ? buildSegmentCopyTextFromParts(
-          seg.seeddance_prompt,
-          seg.camera,
-          seg.transition_out,
-          seg.transcript,
-        )
-      : '';
+  const segmentData = getActiveSegmentData();
+  let copyText = '';
+  if (promptEl) {
+    copyText = buildSegmentCopyText(index);
+  } else if (seg) {
+    const blocks = [];
+    const lock = formatStyleLockBlock();
+    if (lock) blocks.push(lock);
+    if (index > 0) {
+      const prevTransition = segmentData?.segments?.[index - 1]?.transition_out;
+      blocks.push(formatPreviousSegmentHandoffBlock(prevTransition));
+    }
+    blocks.push(buildSegmentPromptBodyFromParts(
+      seg.seeddance_prompt,
+      seg.camera,
+      seg.transition_out,
+      seg.transcript,
+    ));
+    copyText = blocks.filter(Boolean).join('\n\n');
+  }
 
   if (!copyText) return false;
   return copyText.toLowerCase().includes(brand.toLowerCase());
@@ -1063,13 +1375,6 @@ async function copyText(text, btn) {
   flashCopied(btn);
 }
 
-function copyStyleLock() {
-  const text = getStyleLockText();
-  if (!text) return showToast('Nothing to copy.');
-  const btn = document.querySelector('#style-lock .copy-btn');
-  copyText(`STYLE LOCK — keep consistent across every segment:\n\n${text}`, btn);
-}
-
 function copySegmentPrompt(index) {
   const text = buildSegmentCopyText(index);
   if (!text.trim()) return showToast('Nothing to copy.');
@@ -1087,17 +1392,19 @@ function downloadFile(filename, content, type = 'text/plain') {
 }
 
 function downloadAllPrompts() {
+  const segmentData = getActiveSegmentData();
   if (!segmentData) return;
   let txt = '=== STYLE LOCK ===\n';
   txt += getStyleLockText() + '\n\n';
   segmentData.segments.forEach((seg, i) => {
     txt += `=== SEGMENT ${seg.segment_number} (${seg.start_time} → ${seg.end_time}) ===\n`;
-    txt += buildSegmentCopyText(i) + '\n\n';
+    txt += buildSegmentCopyText(i, { includeStyleLock: false }) + '\n\n';
   });
   downloadFile('adremix-prompts.txt', txt);
 }
 
 async function downloadSRT(style) {
+  const segmentData = getActiveSegmentData();
   if (!whisperData && !segmentData) return;
   try {
     const editedSegments = segmentData?.segments?.map((seg, i) => ({
@@ -1117,6 +1424,7 @@ async function downloadSRT(style) {
 }
 
 function downloadFullExport() {
+  const segmentData = getActiveSegmentData();
   if (!segmentData) return;
   let txt = `AdRemix Export — ${new Date().toLocaleDateString()}\n`;
   txt += `${'='.repeat(50)}\n\n`;
@@ -1131,8 +1439,12 @@ function downloadFullExport() {
   if (referenceImages.length) txt += `REFERENCE IMAGES: ${referenceImages.length} uploaded\n`;
   txt += `\n`;
 
-  txt += `ORIGINAL TRANSCRIPT:\n${document.getElementById('transcript-text').value}\n\n`;
-  txt += `REWRITTEN SCRIPT (by segment):\n`;
+  if (activeTab === 'custom') {
+    txt += `CUSTOM SCRIPT:\n${document.getElementById('custom-script-text').value}\n\n`;
+  } else if (document.getElementById('transcript-text').value.trim()) {
+    txt += `ORIGINAL TRANSCRIPT:\n${document.getElementById('transcript-text').value}\n\n`;
+  }
+  txt += `SCRIPT (by segment):\n`;
   getRewriteChunksFromDOM().forEach((c, i) => {
     txt += `\n--- Segment ${c.segment_number} (${c.start_time} → ${c.end_time}) ---\n${c.transcript}\n`;
   });
@@ -1147,7 +1459,7 @@ function downloadFullExport() {
     txt += `${'─'.repeat(50)}\n`;
     txt += `SEGMENT ${seg.segment_number} · ${seg.start_time} → ${seg.end_time}\n`;
     txt += `${'─'.repeat(50)}\n`;
-    txt += buildSegmentCopyText(i) + '\n\n';
+    txt += buildSegmentCopyText(i, { includeStyleLock: false }) + '\n\n';
   });
 
   downloadFile(`adremix-export-${Date.now()}.txt`, txt);

@@ -1260,14 +1260,17 @@ function formatStyleLockBlock() {
 function formatPreviousSegmentHandoffBlock(previousTransition) {
   const t = (previousTransition || '').trim();
   const frameDesc = t
-    ? `The previous segment ended on this exact frame:\n${t}`
-    : `Use the attached reference screenshot as the exact opening frame from the previous segment.`;
+    ? `The previous segment ended on this exact frame:\n${t}\n\nLook at the attached reference image for this end frame and transition from there.`
+    : `Look at the attached reference image for the previous segment's end frame and transition from there.`;
   return (
     `CONTINUE FROM PREVIOUS SEGMENT\n\n` +
     `${frameDesc}\n\n` +
     `A reference screenshot of that end frame is attached as an image input — match it precisely. ` +
     `Open this segment by transitioning naturally from that composition (same pose, prop placement, ` +
-    `framing, and background continuity unless the script clearly calls for a hard cut).`
+    `framing, and background continuity unless the script clearly calls for a hard cut). ` +
+    `Match the reference image's lighting, exposure, color grade, and saturation exactly — do NOT shift ` +
+    `warmth, contrast, filters, or color treatment. The look must stay identical across segments with no ` +
+    `cumulative drift (no slowly increasing saturation, brightness, or stylization from clip to clip).`
   );
 }
 
